@@ -144,6 +144,13 @@ export default function LoginForm() {
               Sign In
             </button>
           </form>
+
+          <p className="mt-6 text-center text-sm text-slate-600">
+            New here?{" "}
+            <Link href="/signup" className="font-semibold text-pulseBlue transition hover:text-pulseTeal">
+              Create account
+            </Link>
+          </p>
         </div>
       </div>
     </div>

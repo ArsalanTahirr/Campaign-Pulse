@@ -1,7 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
-import Button from "@/components/ui/Button";
 import { NAV_LINKS } from "@/lib/constants/navigation";
+
+const primaryCtaClassName =
+  "inline-flex items-center justify-center rounded-xl px-5 py-3 text-sm font-semibold transition duration-200 bg-brand-600 text-white shadow-lg shadow-brand-500/30 hover:bg-brand-700";
 
 export default function Navbar() {
   return (
@@ -29,7 +31,9 @@ export default function Navbar() {
           >
             Login
           </Link>
-          <Button className="inline-flex">Get Started</Button>
+          <Link href="/signup" className={primaryCtaClassName}>
+            Get Started
+          </Link>
         </div>
       </div>
     </header>
