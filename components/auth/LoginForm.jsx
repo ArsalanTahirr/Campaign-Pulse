@@ -1,11 +1,66 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { X } from "lucide-react";
 
 export default function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
+  const forgotTitleId = useId();
+  const forgotDescId = useId();
+
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [resetStep, setResetStep] = useState("email");
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
+
+  const closeForgotModal = useCallback(() => {
+    setForgotOpen(false);
+    setResetStep("email");
+    setResetEmail("");
+    setResetCode("");
+    setResetMessage("");
+  }, []);
+
+  useEffect(() => {
+    if (!forgotOpen) return;
+    function onKeyDown(e) {
+      if (e.key === "Escape") closeForgotModal();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = "";
+    };
+  }, [forgotOpen, closeForgotModal]);
+
+  function handleSendCode(e) {
+    e.preventDefault();
+    if (!resetEmail.trim()) {
+      setResetMessage("Please enter your email address.");
+      return;
+    }
+    setResetMessage("");
+    setResetStep("code");
+  }
+
+  function handleVerifyCode(e) {
+    e.preventDefault();
+    if (!resetCode.trim()) {
+      setResetMessage("Please enter the code from your email.");
+      return;
+    }
+    setResetMessage("");
+    closeForgotModal();
+  }
+
+  function handleResendCode() {
+    setResetCode("");
+    setResetMessage("A new code has been sent (demo — connect your API to send real emails).");
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased">
@@ -132,9 +187,13 @@ export default function LoginForm() {
                 />
                 Remember me
               </label>
-              <a href="#" className="font-medium text-pulseBlue transition hover:text-pulseTeal">
+              <button
+                type="button"
+                onClick={() => setForgotOpen(true)}
+                className="font-medium text-pulseBlue transition hover:text-pulseTeal"
+              >
                 Forgot password?
-              </a>
+              </button>
             </div>
 
             <button
@@ -152,6 +211,127 @@ export default function LoginForm() {
             </Link>
           </p>
         </div>
+
+        {forgotOpen ? (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            role="presentation"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) closeForgotModal();
+            }}
+          >
+            <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" aria-hidden />
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={forgotTitleId}
+              aria-describedby={forgotDescId}
+              className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl sm:p-8"
+            >
+              <button
+                type="button"
+                onClick={closeForgotModal}
+                className="absolute right-4 top-4 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" strokeWidth={2} />
+              </button>
+
+              <h2 id={forgotTitleId} className="pr-10 text-xl font-bold tracking-tight text-slate-900">
+                {resetStep === "email" ? "Verify your email" : "Enter verification code"}
+              </h2>
+              <p id={forgotDescId} className="mt-2 text-sm text-slate-600">
+                {resetStep === "email"
+                  ? "We’ll send a one-time code to your email so you can reset your password."
+                  : `We sent a code to ${resetEmail.trim() || "your email"}. Enter it below.`}
+              </p>
+
+              {resetMessage ? (
+                <p
+                  className={`mt-4 rounded-xl border px-3 py-2 text-sm ${
+                    resetMessage.startsWith("Please")
+                      ? "border-amber-200 bg-amber-50 text-amber-900"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  }`}
+                  role="status"
+                >
+                  {resetMessage}
+                </p>
+              ) : null}
+
+              {resetStep === "email" ? (
+                <form className="mt-6 space-y-4" onSubmit={handleSendCode}>
+                  <div>
+                    <label htmlFor="reset-email" className="mb-2 block text-sm font-medium text-slate-700">
+                      Email
+                    </label>
+                    <input
+                      id="reset-email"
+                      name="reset-email"
+                      type="email"
+                      autoComplete="email"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-pulseTeal focus:ring-2 focus:ring-pulseBlue/30"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full rounded-xl bg-gradient-to-r from-pulseTeal to-pulseBlue px-4 py-3 text-sm font-semibold text-white shadow-md transition duration-300 hover:scale-[1.01] focus:outline-none focus:ring-2 focus:ring-pulseBlue/40 focus:ring-offset-2"
+                  >
+                    Send verification code
+                  </button>
+                </form>
+              ) : (
+                <form className="mt-6 space-y-4" onSubmit={handleVerifyCode}>
+                  <div>
+                    <label htmlFor="reset-code" className="mb-2 block text-sm font-medium text-slate-700">
+                      Verification code
+                    </label>
+                    <input
+                      id="reset-code"
+                      name="reset-code"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={resetCode}
+                      onChange={(e) => setResetCode(e.target.value.replace(/\s/g, ""))}
+                      placeholder="Enter code from email"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm tracking-widest outline-none transition focus:border-pulseTeal focus:ring-2 focus:ring-pulseBlue/30"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full rounded-xl bg-gradient-to-r from-pulseTeal to-pulseBlue px-4 py-3 text-sm font-semibold text-white shadow-md transition duration-300 hover:scale-[1.01] focus:outline-none focus:ring-2 focus:ring-pulseBlue/40 focus:ring-offset-2"
+                  >
+                    Verify code
+                  </button>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetStep("email");
+                        setResetCode("");
+                        setResetMessage("");
+                      }}
+                      className="font-medium text-slate-600 underline-offset-2 transition hover:text-slate-900 hover:underline"
+                    >
+                      Use a different email
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResendCode}
+                      className="font-medium text-pulseBlue transition hover:text-pulseTeal"
+                    >
+                      Resend code
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
