@@ -81,15 +81,15 @@ export default function LoginForm() {
             </Link>
           </div>
 
-          <div className="flex flex-1 flex-col justify-center px-6 pb-12 sm:px-10 lg:px-16 mx-auto w-full max-w-[420px]">
+          <div className="flex flex-1 flex-col justify-center px-6 pb-8 sm:pb-12 sm:px-10 lg:px-16 mx-auto w-full max-w-[420px]">
             <div className="mb-6 text-center">
-              <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Welcome Back</h1>
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Welcome Back</h1>
               <p className="mt-2 text-sm text-gray-500 mx-auto max-w-[280px]">Enter your email and password to access your account.</p>
             </div>
 
-            <form className="space-y-5" action="#" method="post">
+            <form className="space-y-4 sm:space-y-5" action="#" method="post">
               <div>
-                <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-gray-700">Email</label>
+                <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700 sm:mb-1.5">Email</label>
                 <input
                   id="email"
                   name="email"
@@ -97,12 +97,12 @@ export default function LoginForm() {
                   autoComplete="email"
                   required
                   placeholder="name@company.com"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 sm:py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
 
               <div>
-                <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-gray-700">Password</label>
+                <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700 sm:mb-1.5">Password</label>
                 <div className="relative">
                   <input
                     id="password"
@@ -111,7 +111,7 @@ export default function LoginForm() {
                     autoComplete="current-password"
                     required
                     placeholder="Enter your password"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 pr-12 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 sm:py-2.5 pr-12 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   />
                   <button
                     type="button"
@@ -144,7 +144,7 @@ export default function LoginForm() {
 
               <button
                 type="submit"
-                className="mt-2 w-full rounded-lg bg-[#3B42F6] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 shadow-md shadow-blue-500/20"
+                className="mt-2 w-full rounded-lg bg-[#3B42F6] px-4 py-2 sm:py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 shadow-md shadow-blue-500/20"
               >
                 Log In
               </button>
@@ -162,7 +162,7 @@ export default function LoginForm() {
             <div className="w-full">
               <button
                 type="button"
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 sm:py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="h-5 w-5">
                   <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303C33.656 32.657 29.205 36 24 36c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.27 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" />
