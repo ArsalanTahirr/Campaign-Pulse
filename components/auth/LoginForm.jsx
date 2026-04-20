@@ -63,10 +63,10 @@ export default function LoginForm() {
   }
 
   return (
-    <main className="min-h-screen bg-white font-sans text-slate-900 antialiased">
-      <div className="flex min-h-screen">
+    <main className="min-h-screen lg:h-screen lg:overflow-hidden bg-white font-sans text-slate-900 antialiased">
+      <div className="flex min-h-screen lg:h-screen">
         {/* Left: form */}
-        <section className="relative flex w-full lg:w-1/2 xl:w-[55%] flex-col">
+        <section className="relative flex w-full lg:w-1/2 xl:w-[55%] flex-col lg:overflow-y-auto">
           {/* Top Logo */}
           <div className="p-6 lg:p-8">
             <Link href="/" className="inline-flex items-center gap-2">
@@ -201,10 +201,10 @@ export default function LoginForm() {
           {/* Text Content */}
           <div className="relative z-10 w-full max-w-lg xl:max-w-xl text-left mb-8 xl:mb-12">
             <h2 className="text-3xl xl:text-4xl font-semibold leading-tight text-white mb-3 xl:mb-4">
-              Effortlessly manage your team<br />and operations.
+              Supercharge your email<br />marketing campaigns.
             </h2>
             <p className="text-base xl:text-lg text-blue-100">
-              Log in to access your CRM dashboard and manage your team.
+              Log in to access your marketing dashboard and grow your audience.
             </p>
           </div>
 
@@ -212,22 +212,22 @@ export default function LoginForm() {
           <div className="relative z-10 w-full max-w-lg xl:max-w-xl rounded-xl bg-[#F8FAFC] p-4 shadow-2xl overflow-hidden h-[450px] scale-90 xl:scale-100 origin-center">
             {/* Top row cards */}
             <div className="flex gap-4 mb-4">
-              {/* Total Sales Card */}
+              {/* Sent Emails Card */}
               <div className="flex-1 rounded-xl bg-[#5A67D8] p-4 text-white shadow-sm">
-                <div className="text-xs font-medium text-indigo-200 mb-1">Total Sales</div>
-                <div className="text-[10px] text-indigo-300 mb-2">Total earnings from sales.</div>
-                <div className="text-2xl font-bold mb-2">$189,374</div>
+                <div className="text-xs font-medium text-indigo-200 mb-1">Sent Emails</div>
+                <div className="text-[10px] text-indigo-300 mb-2">Total emails delivered this month.</div>
+                <div className="text-2xl font-bold mb-2">1.2M</div>
                 <div className="inline-flex items-center gap-1 rounded bg-indigo-500/50 px-1.5 py-0.5 text-[10px]">
-                  <span>↑ 7%</span>
+                  <span>↑ 12%</span>
                   <span className="text-indigo-200">From last month</span>
                 </div>
               </div>
               
-              {/* Chat Performance Card */}
+              {/* Open Rate Card */}
               <div className="flex-1 rounded-xl bg-white p-4 shadow-sm">
-                <div className="text-xs font-medium text-slate-800 mb-1">Chat Performance</div>
-                <div className="text-[10px] text-slate-400 mb-2">E-commerce response time</div>
-                <div className="text-2xl font-bold text-slate-800 mb-2">00:01:30</div>
+                <div className="text-xs font-medium text-slate-800 mb-1">Average Open Rate</div>
+                <div className="text-[10px] text-slate-400 mb-2">Across all campaigns</div>
+                <div className="text-2xl font-bold text-slate-800 mb-2">24.8%</div>
                 {/* Fake line chart */}
                 <svg viewBox="0 0 100 30" className="w-full h-8 text-blue-500 overflow-visible">
                   <path d="M0,20 C10,20 15,5 25,5 C35,5 40,25 50,25 C60,25 65,10 75,10 C85,10 90,15 100,15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -235,13 +235,13 @@ export default function LoginForm() {
                 </svg>
               </div>
 
-              {/* Sales Overview Chart Base (Behind the floating card) */}
+              {/* Engagement Trends Chart Base */}
               <div className="flex-[1.5] rounded-xl bg-white p-4 shadow-sm relative">
                 <div className="flex justify-between items-center mb-1">
-                  <div className="text-xs font-medium text-slate-800">Sales Overview</div>
+                  <div className="text-xs font-medium text-slate-800">Engagement Trends</div>
                   <div className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">Weekly ▼</div>
                 </div>
-                <div className="text-[10px] text-slate-400 mb-4">Monitor sales trends and gain insights for growth.</div>
+                <div className="text-[10px] text-slate-400 mb-4">Monitor open and click rates for your campaigns.</div>
                 {/* Fake bar chart behind */}
                 <div className="flex items-end gap-2 h-20 opacity-30">
                   <div className="w-full bg-slate-200 rounded-t h-[40%]"></div>
@@ -254,35 +254,35 @@ export default function LoginForm() {
 
             {/* Bottom Row - Table */}
             <div className="rounded-xl bg-white p-4 shadow-sm mb-4">
-              <div className="text-xs font-medium text-slate-800 mb-1">Product Transaction</div>
-              <div className="text-[10px] text-slate-400 mb-3">Latest transactions in real-time</div>
+              <div className="text-xs font-medium text-slate-800 mb-1">Recent Campaigns</div>
+              <div className="text-[10px] text-slate-400 mb-3">Performance of your latest broadcasts</div>
               
               <div className="w-full text-[10px]">
                 <div className="flex text-slate-400 border-b border-slate-100 pb-2 mb-2">
                   <div className="w-8"></div>
-                  <div className="flex-[2]">Order ID</div>
-                  <div className="flex-[3]">Product Name</div>
-                  <div className="flex-[2]">Order Date</div>
-                  <div className="flex-[2]">Total Price</div>
+                  <div className="flex-[2]">Campaign</div>
+                  <div className="flex-[3]">Subject Line</div>
+                  <div className="flex-[2]">Sent Date</div>
+                  <div className="flex-[2]">Open Rate</div>
                   <div className="w-16">Status</div>
                 </div>
                 
                 {[
-                  { id: "#GLR890101-BN", name: "Apple iPad (Gen 10)", date: "13 February, 2025", price: "$449", status: "Active" },
-                  { id: "#GLR890100-BN", name: "Apple iPhone 13", date: "13 February, 2025", price: "$1,199", status: "Pending" },
-                  { id: "#GLR890129-7N", name: "Apple MacBook Air M2", date: "13 February, 2025", price: "$999", status: "Paid" },
+                  { id: "Welcome Series", name: "Welcome to CampaignPulse!", date: "13 Feb, 2025", price: "42.5%", status: "Active" },
+                  { id: "Monthly Newsletter", name: "Your Feb Updates & News", date: "10 Feb, 2025", price: "28.1%", status: "Sent" },
+                  { id: "Promo Offer", name: "Save 20% on Annual Plans", date: "05 Feb, 2025", price: "15.4%", status: "Draft" },
                 ].map((row, i) => (
                   <div key={i} className="flex items-center text-slate-600 py-1.5 border-b border-slate-50 last:border-0">
                     <div className="w-8 flex justify-center"><div className="w-2 h-2 rounded border border-slate-200 bg-white"></div></div>
                     <div className="flex-[2] font-medium text-slate-800">{row.id}</div>
-                    <div className="flex-[3] flex items-center gap-1.5">
-                      <div className="w-4 h-4 rounded bg-slate-100 flex items-center justify-center text-[6px]">🍎</div>
-                      {row.name}
+                    <div className="flex-[3] flex items-center gap-1.5 truncate pr-2">
+                      <div className="w-4 h-4 rounded bg-slate-100 flex-shrink-0 flex items-center justify-center text-[6px]">✉️</div>
+                      <span className="truncate">{row.name}</span>
                     </div>
                     <div className="flex-[2]">{row.date}</div>
                     <div className="flex-[2] font-medium text-slate-800">{row.price}</div>
                     <div className="w-16">
-                      <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-medium ${row.status === 'Paid' ? 'bg-emerald-100 text-emerald-600' : row.status === 'Active' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-medium ${row.status === 'Sent' ? 'bg-emerald-100 text-emerald-600' : row.status === 'Active' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
                         • {row.status}
                       </span>
                     </div>
@@ -294,10 +294,10 @@ export default function LoginForm() {
             {/* Floating Donut Chart Card */}
             <div className="absolute right-4 top-20 w-64 rounded-xl bg-white p-5 shadow-2xl border border-slate-100">
               <div className="flex justify-between items-center mb-1">
-                <div className="text-xs font-bold text-slate-800">Sales Categories</div>
-                <div className="text-[9px] text-slate-400 bg-slate-50 border border-slate-100 px-1.5 py-0.5 rounded">Monthly ▼</div>
+                <div className="text-xs font-bold text-slate-800">Audience Breakdown</div>
+                <div className="text-[9px] text-slate-400 bg-slate-50 border border-slate-100 px-1.5 py-0.5 rounded">All Time ▼</div>
               </div>
-              <div className="text-[9px] text-slate-400 mb-6">Your sales product categories.</div>
+              <div className="text-[9px] text-slate-400 mb-6">Subscriber segments by engagement.</div>
               
               <div className="relative flex justify-center items-center h-28 mb-4">
                 {/* SVG Donut Chart */}
@@ -307,16 +307,16 @@ export default function LoginForm() {
                   <path d="M 50 10 A 40 40 0 0 1 90 50" fill="none" stroke="#A5B4FC" strokeWidth="12" strokeLinecap="round" strokeDasharray="62.8" strokeDashoffset="0" />
                 </svg>
                 <div className="absolute bottom-2 text-center bg-white rounded-full p-2 w-20 h-20 flex flex-col items-center justify-center shadow-[0_-4px_10px_rgba(0,0,0,0.05)] border-t border-slate-50">
-                  <div className="text-[8px] text-slate-400">Total Sales</div>
-                  <div className="text-sm font-bold text-slate-800 tracking-tight">6,248 Units</div>
+                  <div className="text-[8px] text-slate-400">Total Subs</div>
+                  <div className="text-sm font-bold text-slate-800 tracking-tight">14,204</div>
                 </div>
               </div>
 
               <div className="space-y-1.5">
                 {[
-                  { color: "bg-[#6366F1]", label: "Smartphones", value: "3,849 unit" },
-                  { color: "bg-[#A5B4FC]", label: "Laptops & PC", value: "750 unit" },
-                  { color: "bg-slate-200", label: "Accessories", value: "1,649 unit" },
+                  { color: "bg-[#6366F1]", label: "Highly Engaged", value: "8,245" },
+                  { color: "bg-[#A5B4FC]", label: "Occasionally", value: "4,310" },
+                  { color: "bg-slate-200", label: "Inactive", value: "1,649" },
                 ].map((item, i) => (
                   <div key={i} className="flex justify-between items-center text-[9px]">
                     <div className="flex items-center gap-1.5 text-slate-600">
