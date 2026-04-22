@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net">
   <diagram name="Page-1" id="mL-5BjXbFVXoIXLBgePz">
-    <mxGraphModel dx="7070" dy="4010" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
+    <mxGraphModel dx="4495" dy="2605" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -708,17 +708,11 @@
         <mxCell id="iMEK3RV2IdITyHgdig4k-9" parent="1" style="ellipse;whiteSpace=wrap;html=1;align=center;" value="Custom_Variables" vertex="1">
           <mxGeometry height="40" width="120" x="1540" y="-730" as="geometry" />
         </mxCell>
-        <mxCell id="iMEK3RV2IdITyHgdig4k-50" edge="1" parent="1" source="iMEK3RV2IdITyHgdig4k-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="3EOg4pojLMaPqpeo-IO_-36">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="iMEK3RV2IdITyHgdig4k-10" parent="1" style="ellipse;whiteSpace=wrap;html=1;align=center;" value="Campaign_ID" vertex="1">
-          <mxGeometry height="40" width="100" x="2060" y="-750" as="geometry" />
-        </mxCell>
         <mxCell id="iMEK3RV2IdITyHgdig4k-49" edge="1" parent="1" source="iMEK3RV2IdITyHgdig4k-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="3EOg4pojLMaPqpeo-IO_-36">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="iMEK3RV2IdITyHgdig4k-11" parent="1" style="ellipse;whiteSpace=wrap;html=1;align=center;" value="Lead_ID" vertex="1">
-          <mxGeometry height="40" width="100" x="2060" y="-800" as="geometry" />
+          <mxGeometry height="40" width="100" x="2060" y="-750" as="geometry" />
         </mxCell>
         <mxCell id="iMEK3RV2IdITyHgdig4k-31" edge="1" parent="1" source="iMEK3RV2IdITyHgdig4k-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="iMEK3RV2IdITyHgdig4k-29">
           <mxGeometry relative="1" as="geometry" />
@@ -775,7 +769,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="iMEK3RV2IdITyHgdig4k-47" parent="1" style="ellipse;whiteSpace=wrap;html=1;align=center;fontStyle=4;" value="Event_ID" vertex="1">
-          <mxGeometry height="40" width="100" x="2060" y="-850" as="geometry" />
+          <mxGeometry height="40" width="100" x="2060" y="-800" as="geometry" />
         </mxCell>
         <mxCell id="iMEK3RV2IdITyHgdig4k-55" parent="1" style="shape=rhombus;perimeter=rhombusPerimeter;whiteSpace=wrap;html=1;align=center;" value="Runs" vertex="1">
           <mxGeometry height="60" width="120" x="1210" y="-120" as="geometry" />
