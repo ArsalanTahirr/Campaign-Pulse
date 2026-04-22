@@ -39,7 +39,9 @@ load_dotenv(dotenv_path=_ENV_PATH)
 # DATABASE_URL must follow the psycopg2 DSN format:
 #   postgresql+psycopg2://user:password@host:port/dbname
 # Example: postgresql+psycopg2://postgres:secret@localhost:5432/campaign_pulse_db
-DATABASE_URL: str = os.environ["DATABASE_URL"]
+DATABASE_URL: str = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL is not set")
 
 # ---------------------------------------------------------------------------
 # Engine

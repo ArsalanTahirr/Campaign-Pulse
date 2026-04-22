@@ -38,8 +38,10 @@ config = context.config
 # Override the sqlalchemy.url in alembic.ini with the value from the
 # environment.  This keeps credentials out of version control entirely.
 database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+if not database_url:
+    raise ValueError("DATABASE_URL is not set")
+
+config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
