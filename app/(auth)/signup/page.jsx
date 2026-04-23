@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Home, Inbox, Mail, Send, Sparkles, TrendingUp } from "lucide-react";
+import { ArrowLeft, Home, Inbox, Mail, Send, Sparkles, TrendingUp, AlertCircle } from "lucide-react";
 
 function GoogleIcon({ className = "h-5 w-5" }) {
   return (
@@ -29,10 +29,10 @@ function GoogleIcon({ className = "h-5 w-5" }) {
 }
 
 const inputPeerClass =
-  "peer h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition duration-200 placeholder:text-transparent focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20";
+  "peer h-12 w-full rounded-xl border bg-white px-4 text-sm text-slate-900 outline-none transition duration-200 placeholder:text-transparent";
 
 const floatingLabelClass =
-  "pointer-events-none absolute left-4 top-1/2 z-[1] -translate-y-1/2 bg-white px-1 text-sm text-slate-500 transition-all duration-200 peer-focus:top-0 peer-focus:-translate-y-0 peer-focus:text-xs peer-focus:text-brand-600 peer-[:not(:placeholder-shown)]:top-0 peer-[:not(:placeholder-shown)]:-translate-y-0 peer-[:not(:placeholder-shown)]:text-xs";
+  "pointer-events-none absolute left-4 top-1/2 z-[1] -translate-y-1/2 bg-white px-1 text-sm transition-all duration-200 peer-focus:top-0 peer-focus:-translate-y-0 peer-focus:text-xs peer-[:not(:placeholder-shown)]:top-0 peer-[:not(:placeholder-shown)]:-translate-y-0 peer-[:not(:placeholder-shown)]:text-xs";
 
 const stepVariants = {
   initial: (direction) => ({
@@ -51,27 +51,49 @@ const stepVariants = {
   })
 };
 
-function FloatingInput({ id, label, type = "text", value, onChange, autoComplete, className = "", ...rest }) {
+function FloatingInput({ id, label, type = "text", value, onChange, autoComplete, className = "", error, ...rest }) {
+  const errorInputClass = error
+    ? "border-red-500 bg-red-50 focus:border-red-500 focus:ring-4 focus:ring-red-500/20 text-red-900 pr-10"
+    : "border-slate-200 focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20 shadow-sm";
+    
+  const errorLabelClass = error
+    ? "text-red-500 peer-focus:text-red-600 peer-[:not(:placeholder-shown)]:text-red-500"
+    : "text-slate-500 peer-focus:text-brand-600";
+
   return (
-    <div className={`relative ${className}`}>
-      <input
-        id={id}
-        type={type}
-        placeholder=" "
-        autoComplete={autoComplete}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={inputPeerClass}
-        {...rest}
-      />
-      <label htmlFor={id} className={floatingLabelClass}>
-        {label}
-      </label>
+    <div>
+      <div className={`relative ${className} ${error ? "animate-shake" : ""}`}>
+        <input
+          id={id}
+          type={type}
+          placeholder=" "
+          autoComplete={autoComplete}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${inputPeerClass} ${errorInputClass}`}
+          {...rest}
+        />
+        <label htmlFor={id} className={`${floatingLabelClass} ${errorLabelClass}`}>
+          {label}
+        </label>
+        {error && (
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+            <AlertCircle className="h-4 w-4 text-red-500" aria-hidden="true" />
+          </div>
+        )}
+      </div>
+      <div className={`grid transition-all duration-300 ease-in-out ${error ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
+        <div className="overflow-hidden">
+          <p className="text-xs text-red-600">{error}</p>
+        </div>
+      </div>
     </div>
   );
 }
 
 export default function SignupPage() {
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+  const SIGNUP_ENDPOINT = process.env.NEXT_PUBLIC_SIGNUP_ENDPOINT || "/auth/signup";
   const [formData, setFormData] = useState({
     firstName: "",
     middleName: "",
@@ -79,18 +101,136 @@ export default function SignupPage() {
     dob: "",
     gender: "",
     email: "",
-    password: ""
+    password: "",
+    termsAccepted: false
   });
   const [currentStep, setCurrentStep] = useState(1);
   const [direction, setDirection] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
-  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function sanitizeTextInput(value) {
+    return value.replace(/[<>&"'`]/g, "");
+  }
+
+  function sanitizeEmail(value) {
+    return sanitizeTextInput(value).replace(/\s/g, "").toLowerCase();
+  }
 
   function updateField(field, value) {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    const sanitizedValue = field === "email" ? sanitizeEmail(value) : sanitizeTextInput(value);
+    setFormData((prev) => ({ ...prev, [field]: sanitizedValue }));
+    setErrors((prev) => ({ ...prev, [field]: "" }));
+    setSubmitError("");
+  }
+
+  function isAtLeast18(dateOfBirth) {
+    if (!dateOfBirth) return false;
+    const dob = new Date(dateOfBirth);
+    if (Number.isNaN(dob.getTime())) return false;
+    const today = new Date();
+    let age = today.getFullYear() - dob.getFullYear();
+    const monthDelta = today.getMonth() - dob.getMonth();
+    if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < dob.getDate())) {
+      age -= 1;
+    }
+    return age >= 18;
+  }
+
+  function validateStep(step = currentStep) {
+    const nextErrors = {};
+    const trimmedFirstName = formData.firstName.trim();
+    const trimmedLastName = formData.lastName.trim();
+    const trimmedEmail = formData.email.trim();
+
+    if (step === 1) {
+      if (!trimmedFirstName || trimmedFirstName.length < 2) {
+        nextErrors.firstName = "First name must be at least 2 characters.";
+      }
+      if (!trimmedLastName || trimmedLastName.length < 2) {
+        nextErrors.lastName = "Last name must be at least 2 characters.";
+      }
+    }
+
+    if (step === 2) {
+      if (!formData.dob) {
+        nextErrors.dob = "Please provide your date of birth.";
+      } else if (!isAtLeast18(formData.dob)) {
+        nextErrors.dob = "You must be 18 or older to register.";
+      }
+      if (!formData.gender) {
+        nextErrors.gender = "Please indicate your gender.";
+      }
+    }
+
+    if (step === 3) {
+      if (!trimmedEmail) {
+        nextErrors.email = "Please enter your email address.";
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        nextErrors.email = "Please enter a valid email address.";
+      }
+
+      if (!formData.password) {
+        nextErrors.password = "Please provide a password.";
+      } else if (!/^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(formData.password)) {
+        nextErrors.password = "Password must contain at least 8 characters, including uppercase, number, and symbol.";
+      }
+
+      if (!formData.termsAccepted) {
+        nextErrors.termsAccepted = "You must accept the Terms of Use and Privacy Policy.";
+      }
+    }
+
+    setErrors((prev) => ({ ...prev, ...nextErrors }));
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function validateSignupField(field) {
+    const nextErrors = { ...errors };
+    const value = formData[field] || "";
+    
+    if (field === "firstName") {
+      if (!value.trim() || value.trim().length < 2) {
+        nextErrors.firstName = "First name must be at least 2 characters.";
+      } else delete nextErrors.firstName;
+    }
+    if (field === "lastName") {
+      if (!value.trim() || value.trim().length < 2) {
+        nextErrors.lastName = "Last name must be at least 2 characters.";
+      } else delete nextErrors.lastName;
+    }
+    if (field === "dob") {
+      if (!value) {
+        nextErrors.dob = "Please provide your date of birth.";
+      } else if (!isAtLeast18(value)) {
+        nextErrors.dob = "You must be 18 or older to register.";
+      } else delete nextErrors.dob;
+    }
+    if (field === "gender") {
+      if (!value) nextErrors.gender = "Please indicate your gender.";
+      else delete nextErrors.gender;
+    }
+    if (field === "email") {
+      if (!value.trim()) {
+        nextErrors.email = "Please enter your email address.";
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) {
+        nextErrors.email = "Please enter a valid email address.";
+      } else delete nextErrors.email;
+    }
+    if (field === "password") {
+      if (!value) {
+        nextErrors.password = "Please provide a password.";
+      } else if (!/^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/.test(value)) {
+        nextErrors.password = "Password must contain at least 8 characters, including uppercase, number, and symbol.";
+      } else delete nextErrors.password;
+    }
+    setErrors(nextErrors);
   }
 
   function goNext() {
+    if (!validateStep(currentStep)) return;
     setDirection(1);
     setCurrentStep((s) => Math.min(3, s + 1));
   }
@@ -100,8 +240,39 @@ export default function SignupPage() {
     setCurrentStep((s) => Math.max(1, s - 1));
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    if (!validateStep(3)) return;
+
+    setSubmitError("");
+    setIsSubmitting(true);
+
+    try {
+      const payload = {
+        first_name: formData.firstName.trim(),
+        middle_name: formData.middleName.trim(),
+        last_name: formData.lastName.trim(),
+        date_of_birth: formData.dob,
+        gender: formData.gender,
+        email: formData.email.trim(),
+        password: formData.password,
+        terms_accepted: formData.termsAccepted
+      };
+
+      const response = await fetch(`${API_BASE_URL}${SIGNUP_ENDPOINT}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error("Signup failed");
+      }
+    } catch {
+      setSubmitError("We couldn't complete signup right now. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -152,30 +323,27 @@ export default function SignupPage() {
                         label="First name"
                         value={formData.firstName}
                         onChange={(v) => updateField("firstName", v)}
+                        onBlur={() => validateSignupField("firstName")}
                         autoComplete="given-name"
+                        error={errors.firstName}
                       />
                       <FloatingInput
                         id="lastName"
                         label="Last name"
                         value={formData.lastName}
                         onChange={(v) => updateField("lastName", v)}
+                        onBlur={() => validateSignupField("lastName")}
                         autoComplete="family-name"
+                        error={errors.lastName}
                       />
                     </div>
-                    <div className="relative">
-                      <input
-                        id="middleName"
-                        type="text"
-                        placeholder=" "
-                        autoComplete="additional-name"
-                        value={formData.middleName}
-                        onChange={(e) => updateField("middleName", e.target.value)}
-                        className={inputPeerClass}
-                      />
-                      <label htmlFor="middleName" className={floatingLabelClass}>
-                        Middle name <span className="font-normal text-slate-400">(optional)</span>
-                      </label>
-                    </div>
+                    <FloatingInput
+                      id="middleName"
+                      label={<span>Middle name <span className="font-normal text-slate-400">(optional)</span></span>}
+                      value={formData.middleName}
+                      onChange={(v) => updateField("middleName", v)}
+                      autoComplete="additional-name"
+                    />
 
                     <button
                       type="button"
@@ -234,27 +402,44 @@ export default function SignupPage() {
                       <label htmlFor="dob" className="mb-2 block text-sm font-medium text-slate-700">
                         Date of birth
                       </label>
-                      <input
-                        id="dob"
-                        name="dob"
-                        type="date"
-                        value={formData.dob}
-                        onChange={(e) => updateField("dob", e.target.value)}
-                        className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition [color-scheme:light] focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
-                      />
+                      <div className={`relative ${errors.dob ? "animate-shake" : ""}`}>
+                        <input
+                          id="dob"
+                          name="dob"
+                          type="date"
+                          value={formData.dob}
+                          onChange={(e) => updateField("dob", e.target.value)}
+                          onBlur={() => validateSignupField("dob")}
+                          className={`h-12 w-full rounded-xl border bg-white px-4 text-sm outline-none transition [color-scheme:light] ${
+                            errors.dob
+                              ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
+                              : "border-slate-200 text-slate-900 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
+                          }`}
+                        />
+                      </div>
+                      <div className={`grid transition-all duration-300 ease-in-out ${errors.dob ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
+                        <div className="overflow-hidden">
+                          <p className="text-xs text-red-600">{errors.dob}</p>
+                        </div>
+                      </div>
                     </div>
 
                     <div>
                       <label htmlFor="gender" className="mb-2 block text-sm font-medium text-slate-700">
                         Gender
                       </label>
-                      <div className="relative">
+                      <div className={`relative ${errors.gender ? "animate-shake" : ""}`}>
                         <select
                           id="gender"
                           name="gender"
                           value={formData.gender}
                           onChange={(e) => updateField("gender", e.target.value)}
-                          className="h-12 w-full cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white px-4 pr-10 text-sm text-slate-900 shadow-sm outline-none transition focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
+                          onBlur={() => validateSignupField("gender")}
+                          className={`h-12 w-full cursor-pointer appearance-none rounded-xl border bg-white px-4 pr-10 text-sm outline-none transition ${
+                            errors.gender
+                              ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
+                              : "border-slate-200 text-slate-900 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
+                          }`}
                         >
                           <option value="">Select an option</option>
                           <option value="male">Male</option>
@@ -266,6 +451,11 @@ export default function SignupPage() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                           </svg>
                         </span>
+                      </div>
+                      <div className={`grid transition-all duration-300 ease-in-out ${errors.gender ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
+                        <div className="overflow-hidden">
+                          <p className="text-xs text-red-600">{errors.gender}</p>
+                        </div>
                       </div>
                     </div>
 
@@ -304,11 +494,13 @@ export default function SignupPage() {
                       type="email"
                       value={formData.email}
                       onChange={(v) => updateField("email", v)}
+                      onBlur={() => validateSignupField("email")}
                       autoComplete="email"
+                      error={errors.email}
                     />
 
                     <div>
-                      <div className="relative">
+                      <div className={`relative ${errors.password ? "animate-shake" : ""}`}>
                         <input
                           id="signup-password"
                           type={showPassword ? "text" : "password"}
@@ -316,46 +508,79 @@ export default function SignupPage() {
                           autoComplete="new-password"
                           value={formData.password}
                           onChange={(e) => updateField("password", e.target.value)}
-                          className={`${inputPeerClass} pr-14`}
+                          onBlur={() => validateSignupField("password")}
+                          className={`${inputPeerClass} ${
+                            errors.password
+                              ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
+                              : "border-slate-200 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
+                          } pr-14`}
                         />
-                        <label htmlFor="signup-password" className={floatingLabelClass}>
+                        <label htmlFor="signup-password" className={`${floatingLabelClass} ${
+                          errors.password
+                            ? "text-red-500 peer-focus:text-red-600 peer-[:not(:placeholder-shown)]:text-red-500"
+                            : "text-slate-500 peer-focus:text-brand-600"
+                        }`}>
                           Password
                         </label>
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword((v) => !v)}
-                          className="absolute inset-y-0 right-3 z-[2] my-auto h-8 rounded-md px-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                        >
-                          {showPassword ? "Hide" : "Show"}
-                        </button>
+                        <div className="absolute inset-y-0 right-2 z-[2] flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword((v) => !v)}
+                            className="h-8 rounded-md px-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                          >
+                            {showPassword ? "Hide" : "Show"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className={`grid transition-all duration-300 ease-in-out ${errors.password ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
+                        <div className="overflow-hidden">
+                          <p className="text-xs text-red-600">{errors.password}</p>
+                        </div>
                       </div>
                     </div>
 
-                    <label className="flex cursor-pointer gap-3 text-sm leading-snug text-slate-600">
-                      <input
-                        type="checkbox"
-                        checked={termsAccepted}
-                        onChange={(e) => setTermsAccepted(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30"
-                      />
-                      <span>
-                        I agree to the CampaignPulse{" "}
-                        <Link href="/terms" className="font-medium text-blue-600 hover:text-blue-700">
-                          Terms of Use
-                        </Link>{" "}
-                        and{" "}
-                        <Link href="/privacy" className="font-medium text-blue-600 hover:text-blue-700">
-                          Privacy policy
-                        </Link>
-                        .
-                      </span>
-                    </label>
+                    <div>
+                      <label className="flex cursor-pointer gap-3 text-sm leading-snug text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={formData.termsAccepted}
+                          onChange={(e) => {
+                            setFormData((prev) => ({ ...prev, termsAccepted: e.target.checked }));
+                            setErrors((prev) => ({ ...prev, termsAccepted: "" }));
+                            setSubmitError("");
+                          }}
+                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30"
+                        />
+                        <span className="text-sm text-slate-600">
+                          I agree to the{" "}
+                          <Link href="/terms" className="font-semibold text-brand-600 hover:underline">
+                            Terms of Service
+                          </Link>{" "}
+                          and{" "}
+                          <Link href="/privacy" className="font-semibold text-brand-600 hover:underline">
+                            Privacy Policy
+                          </Link>
+                          .
+                        </span>
+                      </label>
+                      <div className={`grid transition-all duration-300 ease-in-out ${errors.termsAccepted ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
+                        <div className="overflow-hidden">
+                          <p className="text-xs text-red-600">{errors.termsAccepted}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className={`grid transition-all duration-300 ease-in-out ${submitError ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
+                      <div className="overflow-hidden">
+                        <p className="text-sm text-red-600">{submitError}</p>
+                      </div>
+                    </div>
 
                     <button
                       type="submit"
+                      disabled={isSubmitting}
                       className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700"
                     >
-                      Join Now
+                      {isSubmitting ? "Creating account..." : "Join Now"}
                     </button>
                   </motion.div>
                 )}
