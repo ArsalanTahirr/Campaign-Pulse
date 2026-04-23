@@ -236,6 +236,22 @@ class LocalAuth(Base):
         comment="Expiry time for the email verification token.",
     )
 
+    # One-time token used for password reset flows.
+    # Generated when a user requests "forgot password".
+    reset_token = Column(
+        String(255),
+        nullable=True,
+        comment="One-time token sent in the password reset email.",
+    )
+
+    # Expiration timestamp for the password reset token.
+    # Reset requests are invalid after this time.
+    reset_expires_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="Expiry time for the password reset token.",
+    )
+
     # --- Relationship back to User ---
     # Whether the email address has been verified is stored on User.is_verified —
     # the single source of truth for verification state across both local and
