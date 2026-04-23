@@ -805,11 +805,12 @@ class SequenceStep(Base):
     # --- Relationships ---
     campaign = relationship("Campaign", back_populates="steps")
 
-    # One SequenceStep → many EmailEvents (tracks what happened to each send).
+    # One SequenceStep → many EmailEvents.
+    # No cascade delete — EmailEvent rows are the audit log and must survive
+    # step deletion.  The FK on EmailEvent.step_id is SET NULL on delete.
     events = relationship(
         "EmailEvent",
         back_populates="step",
-        cascade="all, delete-orphan",
     )
 
 
@@ -943,11 +944,15 @@ class EmailEvent(Base):
     )
 
     # References the specific email template step that caused the event.
+    # nullable=True + SET NULL: if a step is later deleted (e.g. campaign edited),
+    # the event record is preserved for audit and analytics purposes — only the
+    # FK pointer is cleared.  Using CASCADE here would silently destroy the
+    # deliverability history every time a step is removed.
     step_id = Column(
         UUID(as_uuid=False),
-        ForeignKey("sequence_step.step_id", ondelete="CASCADE"),
-        nullable=False,
-        comment="FK to sequence_step — which step triggered or is associated with this event.",
+        ForeignKey("sequence_step.step_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to sequence_step — NULL if the step has since been deleted.",
     )
 
     # Describes what happened: 'sent', 'opened', 'clicked', 'replied', etc.
