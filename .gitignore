@@ -44,8 +44,6 @@ Desktop.ini
 .cursor/
 .idea/
 .vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
 
 # Optional: Turbopack cache
 .turbo
@@ -262,3 +260,27 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ---------------------------------------------------------------------------
+# Backend — FastAPI / SQLAlchemy / Alembic
+# ---------------------------------------------------------------------------
+
+# Virtual environment (created at repo root as .venv)
+# Already covered above; explicit entry here for clarity in a monorepo layout.
+.venv/
+
+# SQLTools (VS Code / Cursor) auto-generated session files
+*.session.sql
+
+# Alembic: migration VERSION FILES must be committed — do not ignore them.
+# Only ignore the compiled cache that Python drops next to them.
+backend/alembic/versions/__pycache__/
+
+# Python bytecode generated inside the backend package
+backend/**/__pycache__/
+backend/**/*.py[cod]
+
+# If a backend-local .env is ever created, keep it out of version control.
+# The root-level .env (already ignored above) is the primary credentials file.
+backend/.env
+backend/.env.*
