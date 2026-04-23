@@ -32,6 +32,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     ForeignKey,
     Integer,
     Numeric,
@@ -118,6 +119,22 @@ class User(Base):
         nullable=False,
         unique=True,
         comment="Primary email address — used for login and outbound communication.",
+    )
+
+    # Optional demographic field used for profile completeness and personalization.
+    # Keep values normalized at the service layer (e.g. male/female/non_binary/prefer_not_to_say).
+    gender = Column(
+        String(30),
+        nullable=True,
+        comment="User gender value for profile and personalization use-cases.",
+    )
+
+    # Optional date of birth for age-based segmentation and profile data.
+    # Stored as date-only (no timezone/time component).
+    date_of_birth = Column(
+        Date,
+        nullable=True,
+        comment="User date of birth (YYYY-MM-DD).",
     )
 
     # --- Status ---
