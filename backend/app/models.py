@@ -182,6 +182,9 @@ class LocalAuth(Base):
     so that the core users table stays lean and OAuth-only users never have a
     row here at all.  The password_hash must be a bcrypt (or argon2) digest —
     the plain-text password is NEVER stored.
+
+    Email verification state is NOT duplicated here.  Use User.is_verified as
+    the single source of truth for all authentication paths (local and OAuth).
     """
 
     __tablename__ = "local_auth"
@@ -216,17 +219,10 @@ class LocalAuth(Base):
         comment="Expiry time for the email verification token.",
     )
 
-    # Mirrors users.is_verified; kept here so the auth service can check
-    # credential validity without joining the users table.
-    email_verified = Column(
-        Boolean,
-        nullable=False,
-        default=False,
-        server_default=text("false"),
-        comment="True once the user has clicked the email verification link.",
-    )
-
     # --- Relationship back to User ---
+    # Whether the email address has been verified is stored on User.is_verified —
+    # the single source of truth for verification state across both local and
+    # OAuth authentication paths.
     user = relationship("User", back_populates="local_auth")
 
 
