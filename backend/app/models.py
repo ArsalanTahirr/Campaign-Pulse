@@ -891,6 +891,17 @@ class Lead(Base):
         comment="Outreach funnel status: active | replied | unsubscribed | bounced | completed.",
     )
 
+    # The same email address must not appear twice in the same campaign.
+    # Re-enrolling a contact in a new campaign creates a new Lead row in that
+    # campaign — it does not reuse or modify this one.
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_id",
+            "email",
+            name="uq_lead_campaign_email",
+        ),
+    )
+
     # --- Relationships ---
     campaign = relationship("Campaign", back_populates="leads")
 
