@@ -484,6 +484,17 @@ class Collaborator(Base):
         comment="UTC timestamp when the user accepted the invitation. NULL if still pending.",
     )
 
+    # A user can only hold one membership record per workspace.
+    # Without this constraint a duplicate invite would create a second row,
+    # leading to ambiguous role queries and duplicated campaign authorship.
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "user_id",
+            name="uq_collaborator_workspace_user",
+        ),
+    )
+
     # --- Relationships ---
     workspace = relationship("Workspace", back_populates="collaborators")
     user = relationship("User", back_populates="collaborations")
