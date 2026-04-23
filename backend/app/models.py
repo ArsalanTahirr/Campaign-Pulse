@@ -284,6 +284,16 @@ class OAuthAccount(Base):
         comment="UTC timestamp when this OAuth link was first created.",
     )
 
+    # Prevent the same provider account from being linked to two different
+    # CampaignPulse users (e.g., one Google subject ID → one user only).
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_type",
+            "provider_id",
+            name="uq_oauth_provider_account",
+        ),
+    )
+
     # --- Relationship back to User ---
     user = relationship("User", back_populates="oauth_accounts")
 
