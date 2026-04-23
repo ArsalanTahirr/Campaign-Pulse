@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net">
   <diagram name="Page-1" id="mL-5BjXbFVXoIXLBgePz">
-    <mxGraphModel dx="4495" dy="2605" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
+    <mxGraphModel dx="3637" dy="2137" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1920" pageHeight="1200" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -76,23 +76,17 @@
         <mxCell id="3EOg4pojLMaPqpeo-IO_-62" parent="1" style="ellipse;whiteSpace=wrap;html=1;align=center;" value="Workspace_Name" vertex="1">
           <mxGeometry height="40" width="130" x="1490" y="95" as="geometry" />
         </mxCell>
-        <mxCell id="3EOg4pojLMaPqpeo-IO_-73" edge="1" parent="1" source="3EOg4pojLMaPqpeo-IO_-65" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="3EOg4pojLMaPqpeo-IO_-26">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="3EOg4pojLMaPqpeo-IO_-65" parent="1" style="ellipse;whiteSpace=wrap;html=1;align=center;" value="Owner_ID" vertex="1">
-          <mxGeometry height="40" width="100" x="1505" y="155" as="geometry" />
-        </mxCell>
         <mxCell id="3EOg4pojLMaPqpeo-IO_-75" edge="1" parent="1" source="3EOg4pojLMaPqpeo-IO_-66" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="3EOg4pojLMaPqpeo-IO_-26">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="3EOg4pojLMaPqpeo-IO_-66" parent="1" style="ellipse;whiteSpace=wrap;html=1;align=center;" value="Created_At" vertex="1">
-          <mxGeometry height="40" width="100" x="1505" y="215" as="geometry" />
+          <mxGeometry height="40" width="100" x="1505" y="150" as="geometry" />
         </mxCell>
         <mxCell id="3EOg4pojLMaPqpeo-IO_-71" edge="1" parent="1" source="3EOg4pojLMaPqpeo-IO_-67" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="3EOg4pojLMaPqpeo-IO_-26">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="3EOg4pojLMaPqpeo-IO_-67" parent="1" style="ellipse;whiteSpace=wrap;html=1;align=center;fontStyle=4;" value="Works&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;pace_ID&lt;/span&gt;" vertex="1">
-          <mxGeometry height="40" width="100" x="1505" y="35" as="geometry" />
+          <mxGeometry height="40" width="100" x="1505" y="40" as="geometry" />
         </mxCell>
         <mxCell id="3EOg4pojLMaPqpeo-IO_-80" edge="1" parent="1" source="3EOg4pojLMaPqpeo-IO_-76" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="3EOg4pojLMaPqpeo-IO_-27">
           <mxGeometry relative="1" as="geometry" />
