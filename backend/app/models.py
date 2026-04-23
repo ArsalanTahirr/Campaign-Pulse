@@ -162,14 +162,10 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
-    # One User → many Workspace rows where they are the owner.
-    owned_workspaces = relationship(
-        "Workspace",
-        back_populates="owner",
-        foreign_keys="Workspace.owner_id",
-    )
-
     # One User → many Collaborator rows (can be a member of multiple workspaces).
+    # Ownership of a workspace is expressed via CollaboratorRole (Role.role_name = 'Owner'),
+    # not by a direct FK on Workspace.  Use the collaborations relationship below
+    # and filter by role to find workspaces this user owns.
     collaborations = relationship(
         "Collaborator",
         back_populates="user",
@@ -363,11 +359,23 @@ class Workspace(Base):
     The top-level organisational unit in CampaignPulse.
 
     All campaigns, sender accounts, and collaborators are scoped to a
-    workspace.  A user owns exactly one workspace (or can own multiple),
-    and can also be a member (collaborator) in workspaces owned by others.
+    workspace.  Membership and access level — including ownership — are
+    expressed exclusively through the Collaborator + CollaboratorRole chain:
 
-    The owner relationship points to the user who created the workspace and
-    has ultimate administrative control.
+        Workspace → Collaborator → CollaboratorRole → Role (role_name = 'Owner')
+
+    This design means a workspace has no hard-coded single owner column.
+    Ownership is just a role assignment, which makes it trivial to support
+    co-owners, ownership transfer, or custom admin tiers in the future without
+    any schema change.
+
+    To find the owner(s) of a workspace at query time:
+        SELECT c.user_id
+        FROM collaborator c
+        JOIN collaborator_role cr ON cr.member_id = c.member_id
+        JOIN role r               ON r.role_id    = cr.role_id
+        WHERE c.workspace_id = :wid
+          AND r.role_name    = 'Owner'
     """
 
     __tablename__ = "workspace"
@@ -386,14 +394,6 @@ class Workspace(Base):
         comment="Display name for the workspace.",
     )
 
-    # The user who created (and owns) this workspace.
-    owner_id = Column(
-        UUID(as_uuid=False),
-        ForeignKey("users.user_id", ondelete="RESTRICT"),
-        nullable=False,
-        comment="FK to users — workspace owner/admin. RESTRICT prevents orphaned workspaces.",
-    )
-
     created_at = Column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -402,12 +402,6 @@ class Workspace(Base):
     )
 
     # --- Relationships ---
-    owner = relationship(
-        "User",
-        back_populates="owned_workspaces",
-        foreign_keys=[owner_id],
-    )
-
     # One Workspace → many Collaborator memberships.
     collaborators = relationship(
         "Collaborator",
