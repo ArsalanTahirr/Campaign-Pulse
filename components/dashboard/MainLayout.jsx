@@ -6,6 +6,8 @@ import { Space_Grotesk } from "next/font/google";
 import Sidebar from "@/components/dashboard/Sidebar";
 import CampaignsView from "@/components/dashboard/CampaignsView";
 import EmailAccountsView from "@/components/dashboard/EmailAccountsView";
+import UniboxView from "@/components/dashboard/UniboxView";
+import AnalyticsView from "@/components/dashboard/AnalyticsView";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -46,11 +48,11 @@ export default function MainLayout() {
   );
 
   return (
-    <div className="flex min-h-screen bg-slate-50/60">
+    <div className="flex h-screen w-full overflow-hidden bg-slate-50/60">
       <Sidebar activeView={activeView} onViewChange={setActiveView} />
 
-      <main className="flex flex-1 flex-col">
-        <header className="flex h-20 items-center justify-between border-b border-slate-200 bg-white px-6 sm:px-8">
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <header className="sticky top-0 z-50 flex h-20 items-center justify-between border-b border-slate-200 bg-white/95 px-6 backdrop-blur sm:px-8">
           <h1
             className={[
               spaceGrotesk.className,
@@ -125,11 +127,15 @@ export default function MainLayout() {
           </div>
         </header>
 
-        <div className="flex flex-1">
+        <div className="flex flex-1 overflow-y-auto">
           {activeView === "email" ? (
             <EmailAccountsView />
           ) : activeView === "campaigns" ? (
             <CampaignsView />
+          ) : activeView === "unibox" ? (
+            <UniboxView />
+          ) : activeView === "analytics" ? (
+            <AnalyticsView />
           ) : (
             <section className="flex flex-1 items-center justify-center px-6 py-10">
               <p className="text-lg text-slate-500">{activeTitle} view coming soon</p>
