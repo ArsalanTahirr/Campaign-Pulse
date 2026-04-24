@@ -3,18 +3,114 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { X, Home, Inbox, Mail, Send, Sparkles, TrendingUp, Eye, EyeOff } from "lucide-react";
+import { X, Home, Inbox, Mail, Send, Sparkles, TrendingUp, Eye, EyeOff, AlertCircle } from "lucide-react";
 
 export default function LoginForm() {
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+  const LOGIN_ENDPOINT = process.env.NEXT_PUBLIC_LOGIN_ENDPOINT || "/auth/login";
   const [showPassword, setShowPassword] = useState(false);
   const forgotTitleId = useId();
   const forgotDescId = useId();
+  const [loginData, setLoginData] = useState({
+    email: "",
+    password: "",
+    remember: false
+  });
+  const [loginErrors, setLoginErrors] = useState({});
+  const [loginMessage, setLoginMessage] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [forgotOpen, setForgotOpen] = useState(false);
   const [resetStep, setResetStep] = useState("email");
   const [resetEmail, setResetEmail] = useState("");
   const [resetCode, setResetCode] = useState("");
   const [resetMessage, setResetMessage] = useState("");
+
+  function sanitizeTextInput(value) {
+    return value.replace(/[<>&"'`]/g, "");
+  }
+
+  function sanitizeEmail(value) {
+    return sanitizeTextInput(value).replace(/\s/g, "").toLowerCase();
+  }
+
+  function updateLoginField(field, value) {
+    const sanitizedValue = field === "email" ? sanitizeEmail(value) : sanitizeTextInput(value);
+    setLoginData((prev) => ({ ...prev, [field]: sanitizedValue }));
+    setLoginErrors((prev) => ({ ...prev, [field]: "" }));
+    setLoginMessage("");
+  }
+
+  function validateLogin() {
+    const nextErrors = {};
+    const email = loginData.email.trim();
+
+    if (!email) {
+      nextErrors.email = "Please provide your email address.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      nextErrors.email = "Please provide a valid email address.";
+    }
+    if (!loginData.password) {
+      nextErrors.password = "Please provide your password.";
+    }
+
+    setLoginErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function validateLoginField(field) {
+    const nextErrors = { ...loginErrors };
+    if (field === "email") {
+      const email = loginData.email.trim();
+      if (!email) {
+        nextErrors.email = "Please provide your email address.";
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        nextErrors.email = "Please provide a valid email address.";
+      } else {
+        delete nextErrors.email;
+      }
+    } else if (field === "password") {
+      if (!loginData.password) {
+        nextErrors.password = "Please provide your password.";
+      } else {
+        delete nextErrors.password;
+      }
+    }
+    setLoginErrors(nextErrors);
+  }
+
+  async function handleLoginSubmit(e) {
+    e.preventDefault();
+    if (!validateLogin()) return;
+
+    setIsLoggingIn(true);
+    setLoginMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}${LOGIN_ENDPOINT}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: loginData.email.trim(),
+          password: loginData.password,
+          remember_me: loginData.remember
+        })
+      });
+
+      if (response.status === 401) {
+        setLoginMessage("Invalid email or password.");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Login failed");
+      }
+    } catch {
+      setLoginMessage("Something went wrong. Please try again.");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  }
 
   const closeForgotModal = useCallback(() => {
     setForgotOpen(false);
@@ -87,39 +183,73 @@ export default function LoginForm() {
               <p className="mt-2 text-sm text-gray-500 mx-auto max-w-[280px]">Enter your email and password to access your account.</p>
             </div>
 
-            <form className="space-y-4 sm:space-y-5" action="#" method="post">
+            <form className="space-y-4 sm:space-y-5" onSubmit={handleLoginSubmit}>
               <div>
                 <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700 sm:mb-1.5">Email</label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="name@company.com"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 sm:py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
+                <div className={`relative ${loginErrors.email ? "animate-shake" : ""}`}>
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    value={loginData.email}
+                    onChange={(e) => updateLoginField("email", e.target.value)}
+                    onBlur={() => validateLoginField("email")}
+                    placeholder="name@company.com"
+                    className={`w-full rounded-lg border px-4 py-2 sm:py-2.5 text-sm outline-none transition ${
+                      loginErrors.email
+                        ? "border-red-500 pr-10 text-red-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 bg-red-50"
+                        : "border-slate-200 bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    }`}
+                  />
+                  {loginErrors.email && (
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                      <AlertCircle className="h-4 w-4 text-red-500" aria-hidden="true" />
+                    </div>
+                  )}
+                </div>
+                <div className={`grid transition-all duration-300 ease-in-out ${loginErrors.email ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
+                  <div className="overflow-hidden">
+                    <p className="text-xs text-red-600">{loginErrors.email}</p>
+                  </div>
+                </div>
               </div>
 
               <div>
                 <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700 sm:mb-1.5">Password</label>
-                <div className="relative">
+                <div className={`relative ${loginErrors.password ? "animate-shake" : ""}`}>
                   <input
                     id="password"
                     name="password"
                     type={showPassword ? "text" : "password"}
                     autoComplete="current-password"
-                    required
+                    value={loginData.password}
+                    onChange={(e) => updateLoginField("password", e.target.value)}
+                    onBlur={() => validateLoginField("password")}
                     placeholder="Enter your password"
-                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2 sm:py-2.5 pr-12 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className={`w-full rounded-lg border px-4 py-2 sm:py-2.5 pr-14 text-sm outline-none transition ${
+                      loginErrors.password
+                        ? "border-red-500 text-red-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 bg-red-50"
+                        : "border-slate-200 bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    }`}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute inset-y-0 right-3 my-auto flex items-center justify-center text-slate-400 hover:text-slate-600"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+                  <div className="absolute inset-y-0 right-2 flex items-center gap-1">
+                    {loginErrors.password && (
+                      <AlertCircle className="h-4 w-4 text-red-500 pointer-events-none" aria-hidden="true" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="flex items-center justify-center text-slate-400 hover:text-slate-600 p-1"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div className={`grid transition-all duration-300 ease-in-out ${loginErrors.password ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
+                  <div className="overflow-hidden">
+                    <p className="text-xs text-red-600">{loginErrors.password}</p>
+                  </div>
                 </div>
               </div>
 
@@ -129,6 +259,13 @@ export default function LoginForm() {
                     id="remember"
                     name="remember"
                     type="checkbox"
+                    checked={loginData.remember}
+                    onChange={(e) =>
+                      setLoginData((prev) => ({
+                        ...prev,
+                        remember: e.target.checked
+                      }))
+                    }
                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 focus:ring-opacity-50"
                   />
                   Remember Me
@@ -138,16 +275,24 @@ export default function LoginForm() {
                   onClick={() => setForgotOpen(true)}
                   className="font-semibold text-blue-600 hover:text-blue-700"
                 >
-                  Forgot Your Password?
+                  Forgot Password?
                 </button>
               </div>
 
               <button
                 type="submit"
-                className="mt-2 w-full rounded-lg bg-[#3B42F6] px-4 py-2 sm:py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 shadow-md shadow-blue-500/20"
+                disabled={isLoggingIn}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-[#3B42F6] px-4 py-2 sm:py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 shadow-md shadow-blue-500/20 disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                Log In
+                {isLoggingIn && (
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                )}
+                {isLoggingIn ? "Logging in..." : "Log In"}
               </button>
+              {loginMessage ? <p className="text-sm text-red-600">{loginMessage}</p> : null}
             </form>
 
             <div className="relative my-6">

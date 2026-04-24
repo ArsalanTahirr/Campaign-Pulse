@@ -19,6 +19,16 @@ const config = {
       },
       boxShadow: {
         glow: "0 0 0 4px rgba(79,70,229,0.15)"
+      },
+      keyframes: {
+        shake: {
+          "0%, 100%": { transform: "translateX(0)" },
+          "20%, 60%": { transform: "translateX(-4px)" },
+          "40%, 80%": { transform: "translateX(4px)" }
+        }
+      },
+      animation: {
+        shake: "shake 0.4s ease-in-out"
       }
     }
   },
