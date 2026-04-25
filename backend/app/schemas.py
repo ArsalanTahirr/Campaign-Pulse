@@ -11,7 +11,7 @@ from datetime import date
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +114,39 @@ class SignupResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1)
+    remember_me: bool = False
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordConfirmRequest(BaseModel):
+    token: str = Field(min_length=8, max_length=255)
+    new_password: str
+    confirm_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        errors: list[str] = []
+        if len(v) < 8:
+            errors.append("be at least 8 characters long")
+        if not re.search(r"[A-Z]", v):
+            errors.append("contain at least one uppercase letter")
+        if not re.search(r"\d", v):
+            errors.append("contain at least one digit")
+        if not re.search(r"[^A-Za-z0-9]", v):
+            errors.append("contain at least one special character")
+        if errors:
+            raise ValueError("Password must " + ", ".join(errors) + ".")
+        return v
+
+    @model_validator(mode="after")
+    def validate_passwords_match(self):
+        if self.new_password != self.confirm_password:
+            raise ValueError("New password and confirm password must match.")
+        return self
 
 
 # ---------------------------------------------------------------------------
