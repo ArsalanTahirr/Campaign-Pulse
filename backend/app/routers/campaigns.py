@@ -20,6 +20,10 @@ from app.services import campaign_service
 router = APIRouter()
 
 
+def _normalize_campaign_status(status_value: str) -> str:
+    return {"running": "active", "stopped": "completed"}.get(status_value, status_value)
+
+
 def _resolve_member_id(user_id: str, workspace_id: str, db: Session) -> str | None:
     collab = (
         db.query(Collaborator)
@@ -82,6 +86,7 @@ def get_campaign(
     ).scalar() or 0
 
     out = CampaignOut.model_validate(campaign)
+    out.status = _normalize_campaign_status(out.status)
     out.step_count = step_count
     out.lead_count = lead_count
     return out
@@ -97,7 +102,9 @@ def update_campaign(
 ):
     updates = body.model_dump(exclude_unset=True)
     campaign = campaign_service.update_campaign(campaign_id, workspace_id, updates, db)
-    return CampaignOut.model_validate(campaign)
+    out = CampaignOut.model_validate(campaign)
+    out.status = _normalize_campaign_status(out.status)
+    return out
 
 
 @router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)

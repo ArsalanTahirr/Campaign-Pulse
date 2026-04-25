@@ -63,6 +63,18 @@ def update_collaborator_role(
     if not collab:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collaborator not found.")
 
+    # Business rule:
+    # Once an invitation is accepted, role mutation is intentionally disabled.
+    # To change access level, remove collaborator membership and invite again
+    # with the desired role. This keeps invitation-to-membership flow simple.
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "Role changes are disabled after acceptance. "
+            "Remove the collaborator and send a new invitation with the new role."
+        ),
+    )
+
     new_role = db.query(Role).filter(Role.role_id == new_role_id).first()
     if not new_role:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found.")

@@ -149,7 +149,7 @@ def test_start_draft_campaign(client, db, owner, ws):
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 201
-    assert res.json()["run_status"] == "running"
+    assert res.json()["run_status"] == "active"
 
 
 def test_start_campaign_no_variants_fails(client, db, owner, ws):
@@ -167,7 +167,7 @@ def test_start_campaign_no_variants_fails(client, db, owner, ws):
 
 
 def test_pause_running_campaign(client, db, owner, ws):
-    campaign = make_campaign(db, ws.workspace_id, status="running")
+    campaign = make_campaign(db, ws.workspace_id, status="active")
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
         json={"action": "paused"},
@@ -198,7 +198,7 @@ def test_invalid_action_returns_422(client, db, owner, ws):
 
 
 def test_run_history_recorded(client, db, owner, ws):
-    campaign = make_campaign(db, ws.workspace_id, status="running")
+    campaign = make_campaign(db, ws.workspace_id, status="active")
     client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
         json={"action": "paused"},

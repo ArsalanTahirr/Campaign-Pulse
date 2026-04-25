@@ -17,11 +17,20 @@ from app.models import Campaign, CampaignRun, Collaborator, Lead, SequenceStep, 
 from app.services.audit_log_service import write_audit_log
 
 VALID_TRANSITIONS: dict[str, dict] = {
-    "started": {"from": {"draft", "scheduled", "paused"}, "to": "running", "run_status": "running"},
-    "paused": {"from": {"running"}, "to": "paused", "run_status": "paused"},
-    "resumed": {"from": {"paused"}, "to": "running", "run_status": "running"},
-    "stopped": {"from": {"running", "paused"}, "to": "stopped", "run_status": "stopped"},
+    "started": {"from": {"draft", "scheduled", "paused"}, "to": "active", "run_status": "active"},
+    "paused": {"from": {"active"}, "to": "paused", "run_status": "paused"},
+    "resumed": {"from": {"paused"}, "to": "active", "run_status": "active"},
+    "stopped": {"from": {"active", "paused"}, "to": "completed", "run_status": "completed"},
 }
+
+LEGACY_STATUS_ALIASES = {
+    "running": "active",
+    "stopped": "completed",
+}
+
+
+def _normalize_status(status_value: str) -> str:
+    return LEGACY_STATUS_ALIASES.get(status_value, status_value)
 
 
 def _assert_has_email_variants(campaign_id: str, db: Session) -> None:
@@ -78,7 +87,7 @@ def list_campaigns(workspace_id: str, db: Session) -> list[dict]:
             "created_by": c.created_by,
             # Use campaign_name — the schema maps it to `name` via validation_alias
             "campaign_name": c.campaign_name,
-            "status": c.status,
+            "status": _normalize_status(c.status),
             "schedule": c.schedule,
             "start_date": c.start_date,
             "end_date": c.end_date,
@@ -156,11 +165,12 @@ def transition_campaign(
     campaign = get_campaign_or_404(campaign_id, workspace_id, db)
     transition = VALID_TRANSITIONS[action]
 
-    if campaign.status not in transition["from"]:
+    current_status = _normalize_status(campaign.status)
+    if current_status not in transition["from"]:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Cannot perform '{action}' on a campaign in '{campaign.status}' status. "
+                f"Cannot perform '{action}' on a campaign in '{current_status}' status. "
                 f"Allowed from: {transition['from']}."
             ),
         )
@@ -168,7 +178,7 @@ def transition_campaign(
     if action == "started":
         _assert_has_email_variants(campaign_id, db)
 
-    old_status = campaign.status
+    old_status = current_status
     campaign.status = transition["to"]
     campaign.updated_at = datetime.now(timezone.utc)
 

@@ -86,7 +86,7 @@ def test_list_collaborators_analyst(client, db, analyst, ws):
 # ---------------------------------------------------------------------------
 
 
-def test_owner_can_change_any_role(client, db, owner, ws, marketer):
+def test_owner_cannot_change_role_after_acceptance(client, db, owner, ws, marketer):
     agency_role = make_role(db, "Agency")
     cid = _collab_id(client, ws, marketer, auth_cookies(owner))
     assert cid is not None
@@ -95,11 +95,11 @@ def test_owner_can_change_any_role(client, db, owner, ws, marketer):
         json={"role_id": agency_role.role_id},
         cookies=auth_cookies(owner),
     )
-    assert res.status_code == 200
+    assert res.status_code == 409
 
 
 def test_agency_cannot_change_owner_role(client, db, owner, ws, agency_user):
-    """Agency should not be able to demote the Owner."""
+    """Role changes are disabled entirely after acceptance."""
     marketer_role = make_role(db, "Marketing Manager")
     owner_cid = _collab_id(client, ws, owner, auth_cookies(agency_user))
     assert owner_cid is not None
@@ -108,11 +108,11 @@ def test_agency_cannot_change_owner_role(client, db, owner, ws, agency_user):
         json={"role_id": marketer_role.role_id},
         cookies=auth_cookies(agency_user),
     )
-    assert res.status_code == 403
+    assert res.status_code == 409
 
 
 def test_agency_cannot_promote_to_owner(client, db, owner, ws, agency_user, marketer):
-    """Agency should not be able to promote someone to Owner."""
+    """Role changes are disabled entirely after acceptance."""
     owner_role = make_role(db, "Owner")
     cid = _collab_id(client, ws, marketer, auth_cookies(owner))
     res = client.patch(
@@ -120,7 +120,7 @@ def test_agency_cannot_promote_to_owner(client, db, owner, ws, agency_user, mark
         json={"role_id": owner_role.role_id},
         cookies=auth_cookies(agency_user),
     )
-    assert res.status_code == 403
+    assert res.status_code == 409
 
 
 def test_analyst_cannot_change_roles(client, db, analyst, ws, marketer):
@@ -158,6 +158,15 @@ def test_owner_can_remove_member(client, db, owner, ws, marketer):
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 204
+
+    # Revocation is immediate: removed collaborator should disappear right away.
+    after = client.get(
+        f"/workspaces/{ws.workspace_id}/collaborators",
+        cookies=auth_cookies(owner),
+    )
+    assert after.status_code == 200
+    removed_ids = [c["user_id"] for c in after.json()]
+    assert marketer.user_id not in removed_ids
 
 
 def test_cannot_remove_self(client, db, owner, ws):
