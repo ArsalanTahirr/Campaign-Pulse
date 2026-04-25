@@ -272,6 +272,13 @@ export default function SignupPage() {
           const data = await response.json();
           if (typeof data?.detail === "string" && data.detail.trim()) {
             message = data.detail;
+            if (
+              response.status === 409 &&
+              data.detail.toLowerCase().includes("google account")
+            ) {
+              message =
+                'This email is already linked to a Google account. To add a password login, please click "Verify Email" to merge your accounts.';
+            }
           }
         } catch {
           // Keep fallback message.
