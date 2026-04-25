@@ -59,9 +59,11 @@ def verify_password(plain: str, hashed: str) -> bool:
 # A dedicated salt separates verification tokens from any other signed data
 # that might use the same SECRET_KEY in the future.
 _email_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="email-verification")
+_account_link_serializer = URLSafeTimedSerializer(SECRET_KEY, salt="account-linking")
 
 # Default token lifetime: 24 hours
 VERIFICATION_TOKEN_MAX_AGE: int = 60 * 60 * 24
+ACCOUNT_LINK_TOKEN_MAX_AGE: int = 60 * 60 * 24
 
 
 def generate_verification_token(email: str) -> str:
@@ -85,12 +87,28 @@ def decode_verification_token(token: str, max_age: int = VERIFICATION_TOKEN_MAX_
     return _email_serializer.loads(token, max_age=max_age)
 
 
+def generate_account_link_token(email: str) -> str:
+    """
+    Generate a signed token for local-password linking on an existing OAuth account.
+    """
+    return _account_link_serializer.dumps(email)
+
+
+def decode_account_link_token(token: str, max_age: int = ACCOUNT_LINK_TOKEN_MAX_AGE) -> str:
+    """
+    Decode account-link token and return email.
+    """
+    return _account_link_serializer.loads(token, max_age=max_age)
+
+
 # Re-export so route handlers can catch these without importing itsdangerous.
 __all__ = [
     "hash_password",
     "verify_password",
     "generate_verification_token",
     "decode_verification_token",
+    "generate_account_link_token",
+    "decode_account_link_token",
     "create_access_token",
     "decode_access_token",
     "SignatureExpired",
