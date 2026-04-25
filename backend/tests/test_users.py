@@ -490,7 +490,8 @@ def test_login_without_remember_me_sets_session_cookie(client, db, mocker):
     assert resp.status_code == 200
     cookie_header = resp.headers.get("set-cookie", "").lower()
     assert "access_token=" in cookie_header
-    assert "max-age" not in cookie_header
+    access_cookie = [chunk.strip() for chunk in cookie_header.split(",") if chunk.strip().startswith("access_token=")][-1]
+    assert "max-age" not in access_cookie
 
 
 def test_login_with_remember_me_sets_three_day_cookie(client, db, mocker):

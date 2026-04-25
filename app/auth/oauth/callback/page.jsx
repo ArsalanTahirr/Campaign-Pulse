@@ -26,14 +26,6 @@ export default function OAuthCallbackPage() {
 
   useEffect(() => {
     const payload = parseHashPayload();
-    if (payload.accessToken) {
-      // Linkage space for dashboard team:
-      // replace localStorage with secure cookie/session exchange endpoint.
-      localStorage.setItem("access_token", payload.accessToken);
-      localStorage.setItem("token_type", payload.tokenType);
-      localStorage.setItem("user_id", payload.userId);
-      localStorage.setItem("email", payload.email);
-    }
     setEmail(payload.email);
     setHydrated(true);
     if (payload.accessToken) {

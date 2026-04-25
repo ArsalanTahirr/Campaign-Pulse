@@ -277,7 +277,7 @@ export default function SignupPage() {
               data.detail.toLowerCase().includes("google account")
             ) {
               message =
-                'This email is already linked to a Google account. To add a password login, please click "Verify Email" to merge your accounts.';
+                'This email is already linked to a Google account. To add a login password, please click "Verify Email" to merge your accounts.';
             }
           }
         } catch {

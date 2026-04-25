@@ -125,6 +125,9 @@ def _send_verification_email_safe(
 
 
 def _set_auth_cookie(response: Response, token: str, remember_me: bool = False) -> None:
+    # Always clear previous cookie attributes first (e.g., old persistent Max-Age)
+    # before writing the new session/persistent policy.
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
     cookie_kwargs = {
         "key": AUTH_COOKIE_NAME,
         "value": token,
@@ -135,6 +138,8 @@ def _set_auth_cookie(response: Response, token: str, remember_me: bool = False) 
     }
     if remember_me:
         cookie_kwargs["max_age"] = REMEMBER_ME_EXPIRE_SECONDS
+    else:
+        cookie_kwargs["max_age"] = None
     response.set_cookie(**cookie_kwargs)
 
 
