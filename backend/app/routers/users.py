@@ -11,6 +11,7 @@ All routes are mounted under the /auth prefix by main.py:
 
 import os
 import uuid
+import secrets
 import logging
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urljoin
@@ -25,18 +26,31 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import (
     BadSignature,
     SignatureExpired,
+    decode_account_link_token,
     create_access_token,
     decode_access_token,
     decode_verification_token,
+    generate_account_link_token,
     generate_verification_token,
     hash_password,
     JWTError,
     verify_password,
 )
 from app.database import get_db
-from app.email_utils import send_verification_email
+from app.email_utils import (
+    send_account_link_email,
+    send_password_reset_email,
+    send_verification_email,
+)
 from app.models import LocalAuth, OAuthAccount, User
-from app.schemas import LoginRequest, SignupRequest, SignupResponse, TokenResponse
+from app.schemas import (
+    LoginRequest,
+    ResetPasswordConfirmRequest,
+    ResetPasswordRequest,
+    SignupRequest,
+    SignupResponse,
+    TokenResponse,
+)
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -60,6 +74,8 @@ FRONTEND_OAUTH_CALLBACK_PATH: str = os.environ.get(
 )
 FRONTEND_DASHBOARD_PATH: str = os.environ.get("FRONTEND_DASHBOARD_PATH", "/dashboard")
 ACCESS_TOKEN_EXPIRE_SECONDS: int = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 30)) * 60
+REMEMBER_ME_EXPIRE_SECONDS: int = 60 * 60 * 24 * 3
+PASSWORD_RESET_EXPIRE_MINUTES: int = int(os.environ.get("PASSWORD_RESET_EXPIRE_MINUTES", 60))
 
 AUTH_COOKIE_NAME = "access_token"
 
@@ -108,16 +124,43 @@ def _send_verification_email_safe(
         logger.exception("Failed to send verification email to %s", to_email)
 
 
-def _set_auth_cookie(response: Response, token: str) -> None:
-    response.set_cookie(
-        key=AUTH_COOKIE_NAME,
-        value=token,
-        max_age=ACCESS_TOKEN_EXPIRE_SECONDS,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        path="/",
-    )
+def _set_auth_cookie(response: Response, token: str, remember_me: bool = False) -> None:
+    cookie_kwargs = {
+        "key": AUTH_COOKIE_NAME,
+        "value": token,
+        "httponly": True,
+        "samesite": "lax",
+        "secure": False,
+        "path": "/",
+    }
+    if remember_me:
+        cookie_kwargs["max_age"] = REMEMBER_ME_EXPIRE_SECONDS
+    response.set_cookie(**cookie_kwargs)
+
+
+def _send_password_reset_email_safe(to_email: str, token: str, first_name: str) -> None:
+    try:
+        send_password_reset_email(to_email=to_email, token=token, first_name=first_name)
+        logger.info("Password reset email accepted by SMTP for %s", to_email)
+    except Exception:
+        logger.exception("Failed to send password reset email to %s", to_email)
+
+
+def _send_account_link_email_safe(
+    to_email: str,
+    token: str,
+    first_name: str,
+    base_url: str,
+) -> None:
+    try:
+        send_account_link_email(
+            to_email=to_email,
+            token=token,
+            first_name=first_name,
+            base_url=base_url,
+        )
+    except Exception:
+        logger.exception("Failed to send account linking email to %s", to_email)
 
 
 def _extract_access_token(request: Request) -> str:
@@ -183,6 +226,53 @@ def signup(
     """
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
+        local_auth = (
+            db.query(LocalAuth)
+            .filter(LocalAuth.user_id == existing.user_id)
+            .first()
+        )
+        has_google_oauth = (
+            db.query(OAuthAccount)
+            .filter(
+                OAuthAccount.user_id == existing.user_id,
+                OAuthAccount.provider_type == "google",
+            )
+            .first()
+            is not None
+        )
+
+        # Secure account-linking path:
+        # for Google-authenticated accounts without local password, send a
+        # verification link and only set password after link click.
+        if has_google_oauth and (not local_auth or not local_auth.password_hash):
+            link_token = generate_account_link_token(payload.email)
+            link_expires = datetime.now(timezone.utc) + timedelta(hours=24)
+            pending_password_hash = hash_password(payload.password)
+
+            if not local_auth:
+                local_auth = LocalAuth(user_id=existing.user_id)
+                db.add(local_auth)
+
+            local_auth.verification_token = link_token
+            local_auth.token_expires_at = link_expires
+            local_auth.reset_token = pending_password_hash
+            local_auth.reset_expires_at = link_expires
+            db.commit()
+
+            _send_account_link_email_safe(
+                to_email=payload.email,
+                token=link_token,
+                first_name=payload.first_name,
+                base_url=BACKEND_BASE_URL,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This email is already linked to a Google account. "
+                    "To add a password login, please click Verify Email to merge your accounts."
+                ),
+            )
+
         # Recovery path: allow re-signup for accounts that exist but are still
         # unverified. This avoids dead-ends when a previous verification email
         # was never delivered.
@@ -192,11 +282,6 @@ def signup(
                 detail="An account with this email address already exists.",
             )
 
-        local_auth = (
-            db.query(LocalAuth)
-            .filter(LocalAuth.user_id == existing.user_id)
-            .first()
-        )
         if not local_auth:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -345,8 +430,12 @@ def login(
             detail="Please verify your email address before logging in.",
         )
 
-    access_token = create_access_token({"sub": user.user_id, "email": user.email})
-    _set_auth_cookie(response, access_token)
+    token_ttl = timedelta(seconds=REMEMBER_ME_EXPIRE_SECONDS) if payload.remember_me else None
+    access_token = create_access_token(
+        {"sub": user.user_id, "email": user.email},
+        expires_delta=token_ttl,
+    )
+    _set_auth_cookie(response, access_token, remember_me=payload.remember_me)
     return TokenResponse(
         access_token=access_token,
         user_id=user.user_id,
@@ -361,6 +450,139 @@ def login(
 def logout(response: Response):
     response.delete_cookie(AUTH_COOKIE_NAME, path="/")
     return {"message": "Logged out successfully."}
+
+
+@router.post(
+    "/reset-password",
+    summary="Send password reset email if account exists",
+)
+def request_password_reset(
+    payload: ResetPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Generate and store a password-reset token for local-auth users.
+    Always returns success to avoid leaking account existence.
+    """
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user:
+        logger.info("Password reset requested for unknown email: %s", payload.email)
+        return {"message": "If an account exists, a reset link has been sent."}
+
+    local_auth = db.query(LocalAuth).filter(LocalAuth.user_id == user.user_id).first()
+    if not local_auth or not local_auth.password_hash:
+        logger.info(
+            "Password reset skipped for %s (no local password configured).",
+            payload.email,
+        )
+        return {"message": "If an account exists, a reset link has been sent."}
+
+    local_auth.reset_token = secrets.token_urlsafe(32)
+    local_auth.reset_expires_at = datetime.now(timezone.utc) + timedelta(minutes=PASSWORD_RESET_EXPIRE_MINUTES)
+    db.commit()
+
+    background_tasks.add_task(
+        _send_password_reset_email_safe,
+        to_email=user.email,
+        token=local_auth.reset_token,
+        first_name=user.first_name or "there",
+    )
+    logger.info("Password reset token created for %s", payload.email)
+    return {"message": "If an account exists, a reset link has been sent."}
+
+
+@router.post(
+    "/reset-password/confirm",
+    summary="Reset password using a valid token",
+)
+def confirm_password_reset(
+    payload: ResetPasswordConfirmRequest,
+    db: Session = Depends(get_db),
+):
+    local_auth = (
+        db.query(LocalAuth)
+        .filter(LocalAuth.reset_token == payload.token)
+        .first()
+    )
+    if not local_auth or not local_auth.reset_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset token.",
+        )
+
+    if local_auth.reset_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset token has expired.",
+        )
+
+    # Prevent password reuse for better account hygiene and clear UX.
+    if local_auth.password_hash and verify_password(payload.new_password, local_auth.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your new password must be different from your current password.",
+        )
+
+    local_auth.password_hash = hash_password(payload.new_password)
+    local_auth.reset_token = None
+    local_auth.reset_expires_at = None
+    db.commit()
+    return {"message": "Password reset successful."}
+
+
+@router.get(
+    "/link-local-account",
+    summary="Verify and link local password to Google account",
+)
+def link_local_account(token: str, db: Session = Depends(get_db)):
+    def _redirect_result(status_value: str, message_value: str):
+        return RedirectResponse(
+            url=_build_frontend_redirect(
+                FRONTEND_VERIFY_EMAIL_PATH,
+                params={"status": status_value, "message": message_value},
+            ),
+            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        )
+
+    try:
+        email = decode_account_link_token(token)
+    except SignatureExpired:
+        return _redirect_result(
+            "error",
+            "This account-linking link has expired. Please try signup again.",
+        )
+    except BadSignature:
+        return _redirect_result("error", "Invalid account-linking token.")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        return _redirect_result("error", "No account found for this link.")
+
+    local_auth = db.query(LocalAuth).filter(LocalAuth.user_id == user.user_id).first()
+    if (
+        not local_auth
+        or local_auth.verification_token != token
+        or not local_auth.reset_token
+        or (local_auth.token_expires_at and local_auth.token_expires_at < datetime.now(timezone.utc))
+    ):
+        return _redirect_result(
+            "error",
+            "This account-linking link has already been used or is invalid.",
+        )
+
+    local_auth.password_hash = local_auth.reset_token
+    local_auth.verification_token = None
+    local_auth.token_expires_at = None
+    local_auth.reset_token = None
+    local_auth.reset_expires_at = None
+    user.is_verified = True
+    db.commit()
+
+    return _redirect_result(
+        "success",
+        "Your password login has been linked successfully. You can now sign in with Google or password.",
+    )
 
 
 @router.get(
