@@ -73,9 +73,10 @@ class User(Base):
     person-related table (LocalAuth, OAuthAccounts, RefreshTokens,
     Collaborator) carries a foreign key back to this table.
 
-    A user must authenticate through exactly one mechanism:
+    A user may authenticate through one or both mechanisms:
       • LocalAuth  — email + hashed password (traditional login)
       • OAuthAccounts — one or more third-party providers (Google, Microsoft…)
+    This supports secure account linking (e.g., Google + password on same user).
 
     The is_verified flag reflects whether the user has clicked the email
     verification link; unverified users may have restricted access in the API.
