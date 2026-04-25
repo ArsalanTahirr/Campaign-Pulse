@@ -11,14 +11,16 @@ import {
   Inbox,
   Mail,
   Megaphone,
-  Settings
+  Settings,
+  Users2,
 } from "lucide-react";
 
 const navItems = [
   { id: "email-accounts", href: "/dashboard/email-accounts", label: "Email Accounts", icon: Mail },
   { id: "campaigns", href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone },
+  { id: "collaborators", href: "/dashboard/collaborators", label: "Collaborators", icon: Users2 },
   { id: "unibox", href: "/dashboard/unibox", label: "Unibox", icon: Inbox },
-  { id: "analytics", href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 }
+  { id: "analytics", href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
 export default function Sidebar({ user, onLogout, onSettings }) {

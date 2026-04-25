@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { X, Home, Inbox, Mail, Send, TrendingUp, Eye, EyeOff, AlertCircle } from "lucide-react";
 
-export default function LoginForm() {
+export default function LoginForm({ inviteToken: inviteTokenProp = null }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteToken = inviteTokenProp || searchParams.get("invite_token");
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
   const LOGIN_ENDPOINT = process.env.NEXT_PUBLIC_LOGIN_ENDPOINT || "/auth/login";
   const GOOGLE_LOGIN_ENDPOINT = process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENDPOINT || "/auth/google/login";
@@ -129,7 +131,11 @@ export default function LoginForm() {
 
       const safeFirstName = String(firstName).trim() || "there";
       window.sessionStorage.setItem("welcomeFirstName", safeFirstName);
-      router.replace("/dashboard/email-accounts");
+      if (inviteToken) {
+        router.replace(`/invitations/accept/${encodeURIComponent(inviteToken)}`);
+      } else {
+        router.replace("/dashboard/email-accounts");
+      }
     } catch {
       setLoginMessage("Something went wrong. Please try again.");
     } finally {
