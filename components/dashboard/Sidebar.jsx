@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 import {
   BarChart3,
   Inbox,
@@ -12,13 +13,14 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { id: "email", label: "Email Accounts", icon: Mail },
-  { id: "campaigns", label: "Campaigns", icon: Megaphone },
-  { id: "unibox", label: "Unibox", icon: Inbox },
-  { id: "analytics", label: "Analytics", icon: BarChart3 }
+  { id: "email-accounts", href: "/dashboard/email-accounts", label: "Email Accounts", icon: Mail },
+  { id: "campaigns", href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone },
+  { id: "unibox", href: "/dashboard/unibox", label: "Unibox", icon: Inbox },
+  { id: "analytics", href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 }
 ];
 
-export default function Sidebar({ activeView, onViewChange }) {
+export default function Sidebar() {
+  const pathname = usePathname();
   const baseIconButtonClass =
     "mx-auto flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 transition-all duration-200 hover:scale-105 hover:bg-slate-100 hover:text-blue-600";
 
@@ -29,7 +31,6 @@ export default function Sidebar({ activeView, onViewChange }) {
           <Link
             href="/"
             aria-label="Home"
-            onClick={() => onViewChange("email")}
             className="group relative flex items-center justify-center rounded-xl p-1.5 transition-all duration-200 hover:scale-105 hover:bg-slate-100"
           >
             <Image
@@ -48,16 +49,15 @@ export default function Sidebar({ activeView, onViewChange }) {
 
         <div className="flex flex-1 items-center justify-center">
           <nav className="flex flex-col gap-6">
-            {navItems.map(({ id, label, icon: Icon }) => {
-              const isActive = activeView === id;
+            {navItems.map(({ id, href, label, icon: Icon }) => {
+              const isActive = pathname === href || pathname?.startsWith(`${href}/`);
 
               return (
-                <button
+                <Link
                   key={id}
-                  type="button"
+                  href={href}
                   aria-label={label}
                   title={label}
-                  onClick={() => onViewChange(id)}
                   className={[
                     baseIconButtonClass,
                     isActive
@@ -66,7 +66,7 @@ export default function Sidebar({ activeView, onViewChange }) {
                   ].join(" ")}
                 >
                   <Icon className="h-5 w-5" />
-                </button>
+                </Link>
               );
             })}
           </nav>
