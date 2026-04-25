@@ -24,10 +24,9 @@ export default function LoginForm() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [forgotOpen, setForgotOpen] = useState(false);
-  const [resetStep, setResetStep] = useState("email");
   const [resetEmail, setResetEmail] = useState("");
-  const [resetCode, setResetCode] = useState("");
   const [resetMessage, setResetMessage] = useState("");
+  const [isResetSubmitting, setIsResetSubmitting] = useState(false);
 
   function sanitizeTextInput(value) {
     return value.replace(/[<>&"'`]/g, "");
@@ -125,9 +124,7 @@ export default function LoginForm() {
 
   const closeForgotModal = useCallback(() => {
     setForgotOpen(false);
-    setResetStep("email");
     setResetEmail("");
-    setResetCode("");
     setResetMessage("");
   }, []);
 
@@ -144,29 +141,29 @@ export default function LoginForm() {
     };
   }, [forgotOpen, closeForgotModal]);
 
-  function handleSendCode(e) {
+  async function handleSendCode(e) {
     e.preventDefault();
     if (!resetEmail.trim()) {
       setResetMessage("Please enter your email address.");
       return;
     }
+    setIsResetSubmitting(true);
     setResetMessage("");
-    setResetStep("code");
-  }
-
-  function handleVerifyCode(e) {
-    e.preventDefault();
-    if (!resetCode.trim()) {
-      setResetMessage("Please enter the code from your email.");
-      return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: resetEmail.trim().toLowerCase() }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to send reset email.");
+      }
+      setResetMessage("Verification email sent. Please check your inbox to reset your password.");
+    } catch {
+      setResetMessage("Could not send reset email right now. Please try again.");
+    } finally {
+      setIsResetSubmitting(false);
     }
-    setResetMessage("");
-    closeForgotModal();
-  }
-
-  function handleResendCode() {
-    setResetCode("");
-    setResetMessage("A new code has been sent (demo — connect your API to send real emails).");
   }
 
   function handleGoogleLogin() {
@@ -520,12 +517,10 @@ export default function LoginForm() {
               </button>
 
               <h2 id={forgotTitleId} className="pr-10 text-xl font-bold tracking-tight text-slate-900">
-                {resetStep === "email" ? "Verify your email" : "Enter verification code"}
+                Reset your password
               </h2>
               <p id={forgotDescId} className="mt-2 text-sm text-slate-600">
-                {resetStep === "email"
-                  ? "We’ll send a one-time code to your email so you can reset your password."
-                  : `We sent a code to ${resetEmail.trim() || "your email"}. Enter it below.`}
+                Enter your email address and we will send a verification email with a secure password reset link.
               </p>
 
               {resetMessage ? (
@@ -541,76 +536,30 @@ export default function LoginForm() {
                 </p>
               ) : null}
 
-              {resetStep === "email" ? (
-                <form className="mt-6 space-y-4" onSubmit={handleSendCode}>
-                  <div>
-                    <label htmlFor="reset-email" className="mb-2 block text-sm font-medium text-slate-700">
-                      Email
-                    </label>
-                    <input
-                      id="reset-email"
-                      name="reset-email"
-                      type="email"
-                      autoComplete="email"
-                      value={resetEmail}
-                      onChange={(e) => setResetEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700"
-                  >
-                    Send verification code
-                  </button>
-                </form>
-              ) : (
-                <form className="mt-6 space-y-4" onSubmit={handleVerifyCode}>
-                  <div>
-                    <label htmlFor="reset-code" className="mb-2 block text-sm font-medium text-slate-700">
-                      Verification code
-                    </label>
-                    <input
-                      id="reset-code"
-                      name="reset-code"
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      value={resetCode}
-                      onChange={(e) => setResetCode(e.target.value.replace(/\s/g, ""))}
-                      placeholder="Enter code from email"
-                      className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm tracking-widest outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700"
-                  >
-                    Verify code
-                  </button>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setResetStep("email");
-                        setResetCode("");
-                        setResetMessage("");
-                      }}
-                      className="font-medium text-slate-600 underline-offset-2 transition hover:text-slate-900 hover:underline"
-                    >
-                      Use a different email
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleResendCode}
-                      className="font-medium text-blue-600 transition hover:text-blue-700"
-                    >
-                      Resend code
-                    </button>
-                  </div>
-                </form>
-              )}
+              <form className="mt-6 space-y-4" onSubmit={handleSendCode}>
+                <div>
+                  <label htmlFor="reset-email" className="mb-2 block text-sm font-medium text-slate-700">
+                    Email
+                  </label>
+                  <input
+                    id="reset-email"
+                    name="reset-email"
+                    type="email"
+                    autoComplete="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isResetSubmitting}
+                  className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700"
+                >
+                  {isResetSubmitting ? "Sending..." : "Send verification email"}
+                </button>
+              </form>
             </div>
           </div>
         ) : null}
