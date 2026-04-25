@@ -34,6 +34,7 @@ SMTP_EMAIL: str = os.environ.get("SMTP_EMAIL", "")
 SMTP_APP_PASSWORD: str = os.environ.get("SMTP_APP_PASSWORD", "")
 EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "")
 FRONTEND_URL: str = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+FRONTEND_RESET_PASSWORD_PATH: str = os.environ.get("FRONTEND_RESET_PASSWORD_PATH", "/reset-password")
 
 # The icon lives at public/icon.png in the Next.js project, served at /icon.png.
 LOGO_URL: str = f"{FRONTEND_URL}/icon.png"
@@ -270,6 +271,100 @@ def send_verification_email(
     )
 
     # Gmail app-password setups typically use SSL on 465.
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        smtp.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
+        smtp.send_message(message)
+
+
+def send_password_reset_email(
+    to_email: str,
+    token: str,
+    first_name: str,
+) -> None:
+    """
+    Send a password-reset email via SMTP.
+    """
+    reset_url = f"{FRONTEND_URL}{FRONTEND_RESET_PASSWORD_PATH}?token={token}"
+    sender = EMAIL_FROM or SMTP_EMAIL
+    if not sender:
+        raise RuntimeError("SMTP sender is not configured. Set EMAIL_FROM or SMTP_EMAIL.")
+    if not SMTP_EMAIL or not SMTP_APP_PASSWORD:
+        raise RuntimeError("SMTP credentials missing. Set SMTP_EMAIL and SMTP_APP_PASSWORD.")
+
+    text_body = (
+        f"Hi {first_name},\n\n"
+        "We received a request to reset your CampaignPulse password.\n\n"
+        f"Reset your password here:\n{reset_url}\n\n"
+        "This link expires in 60 minutes.\n"
+        "If you did not request this, you can ignore this email."
+    )
+    html_body = f"""
+<html>
+  <body style="font-family:Arial,sans-serif;color:#1f2937;">
+    <h2>Reset your password</h2>
+    <p>Hi {first_name},</p>
+    <p>We received a request to reset your CampaignPulse password.</p>
+    <p><a href="{reset_url}" style="display:inline-block;padding:10px 16px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;">Reset Password</a></p>
+    <p style="font-size:13px;color:#6b7280;">This link expires in 60 minutes.</p>
+    <p style="font-size:13px;color:#6b7280;">If you did not request this, you can ignore this email.</p>
+  </body>
+</html>
+""".strip()
+
+    message = EmailMessage()
+    message["From"] = f"CampaignPulse <{sender}>"
+    message["To"] = to_email
+    message["Subject"] = "Reset your CampaignPulse password"
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
+
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        smtp.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
+        smtp.send_message(message)
+
+
+def send_account_link_email(
+    to_email: str,
+    token: str,
+    first_name: str,
+    base_url: str,
+) -> None:
+    """
+    Send account-link verification email for OAuth-to-local linking.
+    """
+    link_url = f"{base_url}/auth/link-local-account?token={token}"
+    sender = EMAIL_FROM or SMTP_EMAIL
+    if not sender:
+        raise RuntimeError("SMTP sender is not configured. Set EMAIL_FROM or SMTP_EMAIL.")
+    if not SMTP_EMAIL or not SMTP_APP_PASSWORD:
+        raise RuntimeError("SMTP credentials missing. Set SMTP_EMAIL and SMTP_APP_PASSWORD.")
+
+    text_body = (
+        f"Hi {first_name},\n\n"
+        "We detected an attempt to add password login to your Google account.\n\n"
+        f"Confirm account linking here:\n{link_url}\n\n"
+        "This link expires in 24 hours. If this wasn't you, ignore this email."
+    )
+    html_body = f"""
+<html>
+  <body style="font-family:Arial,sans-serif;color:#1f2937;">
+    <h2>Confirm account linking</h2>
+    <p>Hi {first_name},</p>
+    <p>We detected a request to add password login to your Google account.</p>
+    <p><a href="{link_url}" style="display:inline-block;padding:10px 16px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;">Verify Email & Link Account</a></p>
+    <p style="font-size:13px;color:#6b7280;">This link expires in 24 hours.</p>
+    <p style="font-size:13px;color:#6b7280;">If you did not request this, ignore this email.</p>
+  </body>
+</html>
+""".strip()
+
+    message = EmailMessage()
+    message["From"] = f"CampaignPulse <{sender}>"
+    message["To"] = to_email
+    message["Subject"] = "Verify to link password login"
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
+
     with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
         smtp.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
         smtp.send_message(message)
