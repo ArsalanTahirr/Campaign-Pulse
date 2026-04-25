@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { X, Home, Inbox, Mail, Send, Sparkles, TrendingUp, Eye, EyeOff, AlertCircle } from "lucide-react";
 
 export default function LoginForm() {
+  const router = useRouter();
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
   const LOGIN_ENDPOINT = process.env.NEXT_PUBLIC_LOGIN_ENDPOINT || "/auth/login";
+  const GOOGLE_LOGIN_ENDPOINT = process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENDPOINT || "/auth/google/login";
   const [showPassword, setShowPassword] = useState(false);
   const forgotTitleId = useId();
   const forgotDescId = useId();
@@ -90,6 +93,7 @@ export default function LoginForm() {
       const response = await fetch(`${API_BASE_URL}${LOGIN_ENDPOINT}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           email: loginData.email.trim(),
           password: loginData.password,
@@ -101,10 +105,17 @@ export default function LoginForm() {
         setLoginMessage("Invalid email or password.");
         return;
       }
+      if (response.status === 403) {
+        setLoginMessage("Please verify your email before logging in.");
+        return;
+      }
 
       if (!response.ok) {
         throw new Error("Login failed");
       }
+
+      await response.json();
+      router.replace("/dashboard");
     } catch {
       setLoginMessage("Something went wrong. Please try again.");
     } finally {
@@ -158,6 +169,10 @@ export default function LoginForm() {
     setResetMessage("A new code has been sent (demo — connect your API to send real emails).");
   }
 
+  function handleGoogleLogin() {
+    window.location.assign(`${API_BASE_URL}${GOOGLE_LOGIN_ENDPOINT}`);
+  }
+
   return (
     <main className="min-h-screen lg:h-screen lg:overflow-hidden bg-white font-sans text-slate-900 antialiased">
       <div className="flex min-h-screen lg:h-screen">
@@ -165,7 +180,7 @@ export default function LoginForm() {
         <section className="relative flex w-full lg:w-1/2 xl:w-[55%] flex-col lg:overflow-y-auto">
           {/* Top Logo */}
           <div className="p-6 lg:p-8">
-            <Link href="/" className="inline-flex items-center gap-2">
+            <Link href="/login" className="inline-flex items-center gap-2">
               <Image
                 src="/icon.png"
                 alt="CampaignPulse logo"
@@ -307,6 +322,7 @@ export default function LoginForm() {
             <div className="w-full">
               <button
                 type="button"
+                onClick={handleGoogleLogin}
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 sm:py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="h-5 w-5">

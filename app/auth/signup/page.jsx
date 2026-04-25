@@ -94,6 +94,7 @@ function FloatingInput({ id, label, type = "text", value, onChange, autoComplete
 export default function SignupPage() {
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
   const SIGNUP_ENDPOINT = process.env.NEXT_PUBLIC_SIGNUP_ENDPOINT || "/auth/signup";
+  const GOOGLE_LOGIN_ENDPOINT = process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENDPOINT || "/auth/google/login";
   const [formData, setFormData] = useState({
     firstName: "",
     middleName: "",
@@ -250,7 +251,7 @@ export default function SignupPage() {
     try {
       const payload = {
         first_name: formData.firstName.trim(),
-        middle_name: formData.middleName.trim(),
+        middle_name: formData.middleName.trim() || null,
         last_name: formData.lastName.trim(),
         date_of_birth: formData.dob,
         gender: formData.gender,
@@ -266,13 +267,26 @@ export default function SignupPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Signup failed");
+        let message = "Signup failed";
+        try {
+          const data = await response.json();
+          if (typeof data?.detail === "string" && data.detail.trim()) {
+            message = data.detail;
+          }
+        } catch {
+          // Keep fallback message.
+        }
+        throw new Error(message);
       }
-    } catch {
-      setSubmitError("We couldn't complete signup right now. Please try again.");
+    } catch (error) {
+      setSubmitError(error?.message || "We couldn't complete signup right now. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handleGoogleSignup() {
+    window.location.assign(`${API_BASE_URL}${GOOGLE_LOGIN_ENDPOINT}`);
   }
 
   return (
@@ -364,6 +378,7 @@ export default function SignupPage() {
 
                     <button
                       type="button"
+                      onClick={handleGoogleSignup}
                       className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                     >
                       <GoogleIcon />

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 function parseHashPayload() {
   const raw = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
@@ -16,6 +16,7 @@ function parseHashPayload() {
 }
 
 export default function OAuthCallbackPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const provider = searchParams.get("provider") || "google";
   const status = searchParams.get("status") || "success";
@@ -35,7 +36,10 @@ export default function OAuthCallbackPage() {
     }
     setEmail(payload.email);
     setHydrated(true);
-  }, []);
+    if (payload.accessToken) {
+      router.replace("/dashboard");
+    }
+  }, [router]);
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-16">
@@ -53,8 +57,8 @@ export default function OAuthCallbackPage() {
           <Link href="/login" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
             Continue
           </Link>
-          <Link href="/" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-            Home
+          <Link href="/dashboard" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            Dashboard
           </Link>
         </div>
       </div>

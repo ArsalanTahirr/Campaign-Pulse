@@ -326,10 +326,9 @@ def test_google_callback_new_user(client, db, mocker):
     resp = client.get("/auth/google/callback?code=fake_code", follow_redirects=False)
     assert resp.status_code == 307
     location = resp.headers["location"]
-    assert "/oauth/callback" in location
-    assert "provider=google" in location
-    assert "#access_token=" in location
-    assert "email=" in location
+    assert location.endswith("/dashboard")
+    assert "set-cookie" in {k.lower() for k in resp.headers.keys()}
+    assert "access_token=" in resp.headers.get("set-cookie", "")
 
     oauth = (
         db.query(OAuthAccount)

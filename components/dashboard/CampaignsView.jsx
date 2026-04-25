@@ -242,7 +242,7 @@ export default function CampaignsView() {
           {isEmpty ? (
             <div className="py-20 flex flex-col items-center justify-center text-center">
               <Image
-                src="/campaigndood.png"
+                src="/campaignDood.png"
                 alt="Campaigns empty state"
                 width={500}
                 height={500}

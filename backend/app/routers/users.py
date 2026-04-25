@@ -17,7 +17,7 @@ from urllib.parse import urlencode, urljoin
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -26,9 +26,11 @@ from app.auth import (
     BadSignature,
     SignatureExpired,
     create_access_token,
+    decode_access_token,
     decode_verification_token,
     generate_verification_token,
     hash_password,
+    JWTError,
     verify_password,
 )
 from app.database import get_db
@@ -50,12 +52,16 @@ BACKEND_BASE_URL: str = os.environ.get("BACKEND_BASE_URL", "http://localhost:800
 FRONTEND_URL: str = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 FRONTEND_VERIFY_EMAIL_PATH: str = os.environ.get(
     "FRONTEND_VERIFY_EMAIL_PATH",
-    "/verify-email-result",
+    "/auth/verify-email-result",
 )
 FRONTEND_OAUTH_CALLBACK_PATH: str = os.environ.get(
     "FRONTEND_OAUTH_CALLBACK_PATH",
-    "/oauth/callback",
+    "/auth/oauth/callback",
 )
+FRONTEND_DASHBOARD_PATH: str = os.environ.get("FRONTEND_DASHBOARD_PATH", "/dashboard")
+ACCESS_TOKEN_EXPIRE_SECONDS: int = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 30)) * 60
+
+AUTH_COOKIE_NAME = "access_token"
 
 # ---------------------------------------------------------------------------
 # Router
@@ -100,6 +106,56 @@ def _send_verification_email_safe(
         )
     except Exception:
         logger.exception("Failed to send verification email to %s", to_email)
+
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=ACCESS_TOKEN_EXPIRE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+
+
+def _extract_access_token(request: Request) -> str:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header.split(" ", 1)[1].strip()
+    return request.cookies.get(AUTH_COOKIE_NAME, "")
+
+
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    token = _extract_access_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated.",
+        )
+    try:
+        payload = decode_access_token(token)
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired access token.",
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload.",
+        )
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found for this session.",
+        )
+    return user
 
 
 # ===========================================================================
@@ -251,7 +307,11 @@ def signup(
     response_model=TokenResponse,
     summary="Authenticate using email and password",
 )
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(
+    payload: LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
     """
     Local login flow:
       1. Find the user by email.
@@ -286,11 +346,36 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
         )
 
     access_token = create_access_token({"sub": user.user_id, "email": user.email})
+    _set_auth_cookie(response, access_token)
     return TokenResponse(
         access_token=access_token,
         user_id=user.user_id,
         email=user.email,
     )
+
+
+@router.post(
+    "/logout",
+    summary="Logout current user session",
+)
+def logout(response: Response):
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return {"message": "Logged out successfully."}
+
+
+@router.get(
+    "/me",
+    summary="Return currently authenticated user profile",
+)
+def me(current_user: User = Depends(get_current_user)):
+    # Query is strictly user_id-scoped via get_current_user().
+    return {
+        "user_id": current_user.user_id,
+        "email": current_user.email,
+        "first_name": current_user.first_name,
+        "last_name": current_user.last_name,
+        "is_verified": current_user.is_verified,
+    }
 
 
 # ===========================================================================
@@ -533,18 +618,8 @@ def google_callback(code: str, db: Session = Depends(get_db)):
                     raise
                 user = db.query(User).filter(User.user_id == oauth_account.user_id).first()
 
-    access_token = create_access_token(
-        {"sub": user.user_id, "email": user.email}
-    )
-
-    redirect_url = _build_frontend_redirect(
-        FRONTEND_OAUTH_CALLBACK_PATH,
-        params={"status": "success", "provider": "google"},
-        fragment={
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user_id": user.user_id,
-            "email": user.email,
-        },
-    )
-    return RedirectResponse(url=redirect_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    access_token = create_access_token({"sub": user.user_id, "email": user.email})
+    redirect_url = _build_frontend_redirect(FRONTEND_DASHBOARD_PATH)
+    redirect_response = RedirectResponse(url=redirect_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    _set_auth_cookie(redirect_response, access_token)
+    return redirect_response

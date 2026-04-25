@@ -337,3 +337,34 @@ def test_lead_unique_constraint_blocks_duplicate_email_per_campaign(db):
     with pytest.raises(IntegrityError):
         db.commit()
     db.rollback()
+
+
+def test_me_requires_authentication(client):
+    resp = client.get("/auth/me")
+    assert resp.status_code == 401
+
+
+def test_me_returns_only_current_user_scope(client, db, mocker):
+    mocker.patch("app.routers.users.send_verification_email", return_value=None)
+    payload = _valid_payload()
+    signup = client.post("/auth/signup", json=payload)
+    assert signup.status_code == 201
+
+    from app.models import User
+    user = db.query(User).filter(User.email == payload["email"]).first()
+    assert user is not None
+    user.is_verified = True
+    db.commit()
+
+    login = client.post(
+        "/auth/login",
+        json={"email": payload["email"], "password": payload["password"]},
+    )
+    assert login.status_code == 200
+
+    me = client.get("/auth/me")
+    assert me.status_code == 200
+    body = me.json()
+    assert body["user_id"] == user.user_id
+    assert body["email"] == payload["email"]
+
