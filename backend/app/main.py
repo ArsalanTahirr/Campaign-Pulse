@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import users
+from app.routers import workspaces, invitations, collaborators, campaigns, sequences, leads
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -55,6 +56,42 @@ app.add_middleware(
 # Routers
 # ---------------------------------------------------------------------------
 
-# All auth routes live under /auth so they match the frontend's expected
-# endpoints: POST /auth/signup, POST /auth/login, GET /auth/verify-email, etc.
+# Auth (existing)
 app.include_router(users.router, prefix="/auth", tags=["Authentication"])
+
+# Workspaces
+app.include_router(workspaces.router, prefix="/workspaces", tags=["Workspaces"])
+
+# Invitations — two sub-trees:
+#   /workspaces/{id}/invitations  (workspace-scoped management)
+#   /invitations/{token}          (public acceptance flow)
+app.include_router(invitations.router, tags=["Invitations"])
+
+# Collaborators  — /workspaces/{workspace_id}/collaborators
+app.include_router(
+    collaborators.router,
+    prefix="/workspaces/{workspace_id}/collaborators",
+    tags=["Collaborators"],
+)
+
+# Campaigns — /workspaces/{workspace_id}/campaigns
+app.include_router(
+    campaigns.router,
+    prefix="/workspaces/{workspace_id}/campaigns",
+    tags=["Campaigns"],
+)
+
+# Sequence steps + email variants — nested under campaign
+app.include_router(
+    sequences.router,
+    prefix="/workspaces/{workspace_id}/campaigns/{campaign_id}",
+    tags=["Sequences"],
+)
+
+# Leads — nested under campaign
+app.include_router(
+    leads.router,
+    prefix="/workspaces/{workspace_id}/campaigns/{campaign_id}",
+    tags=["Leads"],
+)
+

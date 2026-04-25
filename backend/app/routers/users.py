@@ -43,6 +43,7 @@ from app.email_utils import (
     send_verification_email,
 )
 from app.models import LocalAuth, OAuthAccount, User
+from app.services.workspace_service import ensure_default_owner_workspace
 from app.schemas import (
     LoginRequest,
     ResetPasswordConfirmRequest,
@@ -326,6 +327,11 @@ def signup(
             first_name=payload.first_name,
             base_url=BACKEND_BASE_URL,
         )
+        ensure_default_owner_workspace(
+            user_id=existing.user_id,
+            first_name=existing.first_name,
+            db=db,
+        )
 
         return SignupResponse(
             user_id=existing.user_id,
@@ -376,6 +382,9 @@ def signup(
         first_name=payload.first_name,
         base_url=BACKEND_BASE_URL,
     )
+
+    # Every user must own a default workspace.
+    ensure_default_owner_workspace(user_id=user.user_id, first_name=user.first_name, db=db)
 
     return SignupResponse(
         user_id=user_id,
@@ -440,6 +449,8 @@ def login(
         {"sub": user.user_id, "email": user.email},
         expires_delta=token_ttl,
     )
+    # Safety net for legacy users created before default-workspace enforcement.
+    ensure_default_owner_workspace(user_id=user.user_id, first_name=user.first_name, db=db)
     _set_auth_cookie(response, access_token, remember_me=payload.remember_me)
     return TokenResponse(
         access_token=access_token,
@@ -846,6 +857,8 @@ def google_callback(code: str, db: Session = Depends(get_db)):
                 user = db.query(User).filter(User.user_id == oauth_account.user_id).first()
 
     access_token = create_access_token({"sub": user.user_id, "email": user.email})
+    # Ensure OAuth users also always have a default owner workspace.
+    ensure_default_owner_workspace(user_id=user.user_id, first_name=user.first_name, db=db)
     redirect_url = _build_frontend_redirect(FRONTEND_DASHBOARD_PATH)
     redirect_response = RedirectResponse(url=redirect_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
     _set_auth_cookie(redirect_response, access_token)

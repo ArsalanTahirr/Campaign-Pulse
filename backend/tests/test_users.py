@@ -78,6 +78,31 @@ def test_signup_success(client, mocker):
     assert "verify" in data["message"].lower() or "check" in data["message"].lower()
 
 
+def test_signup_creates_default_owner_workspace(client, db, mocker):
+    from app.models import Collaborator, CollaboratorRole, Role, User
+
+    mocker.patch("app.routers.users.send_verification_email", return_value=None)
+    email = _unique_email()
+    resp = client.post("/auth/signup", json=_payload(email=email))
+    assert resp.status_code == 201
+
+    user = db.query(User).filter(User.email == email).first()
+    assert user is not None
+
+    owner_membership = (
+        db.query(Collaborator)
+        .join(CollaboratorRole, CollaboratorRole.member_id == Collaborator.member_id)
+        .join(Role, Role.role_id == CollaboratorRole.role_id)
+        .filter(
+            Collaborator.user_id == user.user_id,
+            Collaborator.invite_status == "accepted",
+            Role.role_name == "Owner",
+        )
+        .first()
+    )
+    assert owner_membership is not None
+
+
 def test_signup_duplicate_email_unverified_resends_verification(client, mocker):
     mocker.patch("app.routers.users.send_verification_email", return_value=None)
 
@@ -388,7 +413,7 @@ def test_google_callback_new_user(client, db, mocker):
     A brand-new Google identity should create a User + OAuthAccount row and
     return a valid TokenResponse.
     """
-    from app.models import OAuthAccount, User
+    from app.models import Collaborator, CollaboratorRole, OAuthAccount, Role, User
 
     google_sub = f"google_sub_{uuid.uuid4().hex}"
     google_email = _unique_email()
@@ -424,6 +449,19 @@ def test_google_callback_new_user(client, db, mocker):
     user = db.query(User).filter(User.email == google_email).first()
     assert user is not None
     assert user.is_verified is True
+
+    owner_membership = (
+        db.query(Collaborator)
+        .join(CollaboratorRole, CollaboratorRole.member_id == Collaborator.member_id)
+        .join(Role, Role.role_id == CollaboratorRole.role_id)
+        .filter(
+            Collaborator.user_id == user.user_id,
+            Collaborator.invite_status == "accepted",
+            Role.role_name == "Owner",
+        )
+        .first()
+    )
+    assert owner_membership is not None
 
 
 def test_google_callback_existing_user(client, db, mocker):

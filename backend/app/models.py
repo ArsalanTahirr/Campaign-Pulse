@@ -463,6 +463,19 @@ class Workspace(Base):
         cascade="all, delete-orphan",
     )
 
+    # One Workspace → many pending/historical Invitations.
+    invitations = relationship(
+        "Invitation",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+
+    # One Workspace → many AuditLog entries.
+    audit_logs = relationship(
+        "AuditLog",
+        back_populates="workspace",
+    )
+
 
 class Collaborator(Base):
     """
@@ -737,6 +750,28 @@ class Campaign(Base):
         comment="UTC timestamp when this campaign was created.",
     )
 
+    # Scheduling bounds — both optional; a campaign without dates runs indefinitely
+    # until manually stopped.
+    start_date = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC date-time when this campaign is scheduled to start sending.",
+    )
+
+    end_date = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC date-time after which no further emails are sent for this campaign.",
+    )
+
+    # Set on every PATCH by the service layer.  NULL means the record has never
+    # been updated since creation.
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp of the most recent update to this campaign record.",
+    )
+
     # --- Relationships ---
     workspace = relationship("Workspace", back_populates="campaigns")
     creator = relationship(
@@ -758,6 +793,14 @@ class Campaign(Base):
         "Lead",
         back_populates="campaign",
         cascade="all, delete-orphan",
+    )
+
+    # One Campaign → many CampaignRun history rows (start/pause/stop events).
+    runs = relationship(
+        "CampaignRun",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+        order_by="CampaignRun.created_at",
     )
 
 
@@ -804,19 +847,8 @@ class SequenceStep(Base):
         comment="Ordinal position in the email sequence (1 = first email, 2 = follow-up, …).",
     )
 
-    subject_line = Column(
-        String(998),  # RFC 2822 max subject length
-        nullable=False,
-        comment="Email subject line for this step. Supports template variables.",
-    )
-
-    # Full HTML or plain-text email body.  Text is used instead of String
-    # because email bodies are unbounded in length.
-    email_body = Column(
-        Text,
-        nullable=False,
-        comment="HTML or plain-text body of the email. Supports template variables.",
-    )
+    # Email content now lives exclusively in StepEmail rows.
+    # SequenceStep is a pure schedule/order container.
 
     # Delay from the previous step expressed in whole days.
     wait_days = Column(
@@ -825,6 +857,24 @@ class SequenceStep(Base):
         default=0,
         server_default=text("0"),
         comment="Days to wait after the previous step before sending this email.",
+    )
+
+    # Step-level send-time override.  When set, this step fires at this local
+    # time (in the parent Campaign's timezone) rather than the campaign-level
+    # schedule window.  Format: 'HH:MM' (24-hour, e.g. '09:00').
+    send_time = Column(
+        String(5),
+        nullable=True,
+        comment="Step-level send time override (HH:MM, 24-hour). Overrides campaign.schedule.",
+    )
+
+    # Step-level day-of-week override.  JSON array of weekday strings,
+    # e.g. ["Monday", "Wednesday", "Friday"].  When set, this step only fires
+    # on the listed days, overriding the campaign-level schedule.
+    send_days = Column(
+        JSONB,
+        nullable=True,
+        comment="Step-level send-day override — JSON array e.g. [\"Monday\",\"Wednesday\"].",
     )
 
     # Enforce the original natural key as a unique constraint.
@@ -838,6 +888,15 @@ class SequenceStep(Base):
 
     # --- Relationships ---
     campaign = relationship("Campaign", back_populates="steps")
+
+    # One SequenceStep → many StepEmail variants (mailbox rotation / A/B).
+    # Deleting a step cascades to all its email variants.
+    email_variants = relationship(
+        "StepEmail",
+        back_populates="step",
+        cascade="all, delete-orphan",
+        order_by="StepEmail.created_at",
+    )
 
     # One SequenceStep → many EmailEvents.
     # No cascade delete — EmailEvent rows are the audit log and must survive
@@ -925,6 +984,15 @@ class Lead(Base):
         comment="Outreach funnel status: active | replied | unsubscribed | bounced | completed.",
     )
 
+    # Back-reference to the import batch that created this lead.
+    # NULL for leads added manually (not via CSV/XLSX upload).
+    import_session_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("lead_import_session.session_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to lead_import_session — NULL for manually added leads.",
+    )
+
     # The same email address must not appear twice in the same campaign.
     # Re-enrolling a contact in a new campaign creates a new Lead row in that
     # campaign — it does not reuse or modify this one.
@@ -938,6 +1006,13 @@ class Lead(Base):
 
     # --- Relationships ---
     campaign = relationship("Campaign", back_populates="leads")
+
+    # Which import session created this lead (nullable for manual adds).
+    import_session = relationship(
+        "LeadImportSession",
+        back_populates="leads",
+        foreign_keys=[import_session_id],
+    )
 
     # One Lead → many EmailEvents (every send/open/click for this lead).
     events = relationship(
@@ -1276,3 +1351,489 @@ class WarmupSettings(Base):
 
     # --- Relationship back to SenderAccount ---
     sender_account = relationship("SenderAccount", back_populates="warmup_settings")
+
+
+# ===========================================================================
+# INVITATION & AUDIT CLUSTER
+# ===========================================================================
+
+
+class Invitation(Base):
+    """
+    A token-based workspace invitation sent to an email address.
+
+    Decoupled from Collaborator so that invitations can be sent to people who
+    do not yet have a CampaignPulse account.  On acceptance a Collaborator row
+    is created and this record's status is set to 'accepted'.
+
+    The token is a cryptographically-random URL-safe string (secrets.token_urlsafe).
+    It is stored in plain text here because it is single-use and expires within
+    72 hours — it carries no long-term secret.
+
+    Status lifecycle: pending → accepted | declined | cancelled | expired
+    """
+
+    __tablename__ = "invitation"
+
+    invitation_id = Column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=_UUID_DEFAULT,
+        comment="Unique identifier for this invitation record.",
+    )
+
+    workspace_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("workspace.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="FK to workspace — which workspace this invitation grants access to.",
+    )
+
+    # The CampaignPulse user who sent this invitation.
+    invited_by = Column(
+        UUID(as_uuid=False),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="FK to users — the member who created this invitation.",
+    )
+
+    # Email address the invitation was sent to.  The invitee may or may not
+    # already have a CampaignPulse account at the time the invite is sent.
+    invitee_email = Column(
+        String(255),
+        nullable=False,
+        comment="Email address the invitation was sent to.",
+    )
+
+    # The role that will be assigned to the invitee upon acceptance.
+    role_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("role.role_id"),
+        nullable=False,
+        comment="FK to role — the role offered to the invitee.",
+    )
+
+    # Secure single-use token included in the invitation email link.
+    token = Column(
+        String(255),
+        nullable=False,
+        unique=True,
+        comment="Cryptographically-random URL-safe token for accepting this invitation.",
+    )
+
+    # Allowed: pending | accepted | declined | cancelled | expired
+    status = Column(
+        String(20),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'"),
+        comment="Lifecycle state: pending | accepted | declined | cancelled | expired.",
+    )
+
+    # Token becomes invalid after this UTC timestamp.
+    expires_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        comment="UTC expiry time — tokens presented after this are rejected.",
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp when this invitation was created.",
+    )
+
+    # Populated when the invitee accepts or declines.
+    responded_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when the invitee accepted or declined.",
+    )
+
+    # --- Relationships ---
+    workspace = relationship("Workspace", back_populates="invitations")
+    inviter = relationship("User", foreign_keys=[invited_by])
+    role = relationship("Role")
+
+
+class AuditLog(Base):
+    """
+    Immutable append-only record of significant workspace actions.
+
+    Written whenever a role is changed, a collaborator is removed, or a
+    campaign transitions lifecycle state.  Rows are never updated or deleted
+    (except via CASCADE when a workspace is destroyed).
+
+    actor_user_id and workspace_id use SET NULL on delete so historical log
+    entries remain readable even after a user or workspace is removed.
+
+    old_value / new_value store JSONB snapshots of the affected entity before
+    and after the change, giving a full diff for any audited action.
+    """
+
+    __tablename__ = "audit_log"
+
+    log_id = Column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=_UUID_DEFAULT,
+        comment="Unique identifier for this audit log entry.",
+    )
+
+    workspace_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("workspace.workspace_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to workspace — NULL if the workspace has since been deleted.",
+    )
+
+    # The user who performed the action.
+    actor_user_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to users — the user who triggered this event. NULL if user deleted.",
+    )
+
+    # Short machine-readable event name e.g. 'role_changed', 'collaborator_removed'.
+    action = Column(
+        String(100),
+        nullable=False,
+        comment="Machine-readable action name e.g. role_changed, campaign_started.",
+    )
+
+    # The type of entity that was affected: 'collaborator', 'campaign', 'invitation'.
+    target_type = Column(
+        String(50),
+        nullable=True,
+        comment="Type of affected entity: collaborator | campaign | invitation.",
+    )
+
+    # The UUID of the affected entity at the time of the event.
+    target_id = Column(
+        UUID(as_uuid=False),
+        nullable=True,
+        comment="UUID of the affected entity at the time of the event.",
+    )
+
+    # Snapshots of the affected entity before and after the change.
+    old_value = Column(
+        JSONB,
+        nullable=True,
+        comment="JSONB snapshot of the entity state before this action.",
+    )
+
+    new_value = Column(
+        JSONB,
+        nullable=True,
+        comment="JSONB snapshot of the entity state after this action.",
+    )
+
+    occurred_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp when this event was recorded.",
+    )
+
+    # --- Relationships ---
+    workspace = relationship("Workspace", back_populates="audit_logs")
+    actor = relationship("User", foreign_keys=[actor_user_id])
+
+
+# ===========================================================================
+# LEAD IMPORT CLUSTER
+# ===========================================================================
+
+
+class LeadImportSession(Base):
+    """
+    Metadata record for a single CSV / XLSX lead-import operation.
+
+    One row is created per upload request.  The service layer populates
+    row_count, imported_count, skipped_count, and error_count once parsing
+    completes, then flips status to 'completed' or 'failed'.
+
+    error_details holds a JSONB array of per-row validation errors:
+        [{"row": 3, "email": "bad@", "reason": "invalid email format"}, ...]
+
+    Every Lead row created during an import carries import_session_id pointing
+    back to this record.  Leads added manually have import_session_id = NULL.
+    """
+
+    __tablename__ = "lead_import_session"
+
+    session_id = Column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=_UUID_DEFAULT,
+        comment="Unique identifier for this import session.",
+    )
+
+    campaign_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("campaign.campaign_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="FK to campaign — which campaign these leads were uploaded to.",
+    )
+
+    # The workspace member who performed the upload.
+    imported_by = Column(
+        UUID(as_uuid=False),
+        ForeignKey("users.user_id"),
+        nullable=False,
+        comment="FK to users — the user who triggered this import.",
+    )
+
+    file_name = Column(
+        String(255),
+        nullable=False,
+        comment="Original filename of the uploaded file (e.g. 'leads_q2.csv').",
+    )
+
+    # Totals populated after parse completes.
+    row_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="Total rows parsed from the file (header excluded).",
+    )
+
+    imported_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="Rows successfully written to the lead table.",
+    )
+
+    skipped_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="Rows skipped due to duplicate email (uq_lead_campaign_email violation).",
+    )
+
+    error_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="Rows rejected due to validation errors (not written to lead table).",
+    )
+
+    # Per-row validation errors for the error-report download feature.
+    error_details = Column(
+        JSONB,
+        nullable=True,
+        comment='JSONB array of per-row errors: [{"row": N, "email": "...", "reason": "..."}].',
+    )
+
+    # Allowed: processing | completed | failed
+    status = Column(
+        String(30),
+        nullable=False,
+        default="processing",
+        server_default=text("'processing'"),
+        comment="Import job state: processing | completed | failed.",
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp when this import session was created.",
+    )
+
+    completed_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when parsing finished (success or failure).",
+    )
+
+    # --- Relationships ---
+    campaign = relationship("Campaign")
+    uploader = relationship("User", foreign_keys=[imported_by])
+
+    # All Lead rows created during this session.
+    leads = relationship(
+        "Lead",
+        back_populates="import_session",
+        foreign_keys="Lead.import_session_id",
+    )
+
+
+# ===========================================================================
+# STEP EMAIL CLUSTER
+# ===========================================================================
+
+
+class StepEmail(Base):
+    """
+    A single email variant belonging to a SequenceStep.
+
+    Each SequenceStep can have one or more StepEmail rows.  The sending engine
+    cycles through the variants, rotating across sender accounts, to distribute
+    outreach volume across mailboxes and domains.
+
+    sender_account_id controls which mailbox is used:
+      • NULL   — the sending engine picks the next available account from the
+                 workspace's rotation pool (round-robin, respecting daily limits).
+      • non-NULL — this variant is always sent from the pinned SenderAccount.
+
+    A step with zero StepEmail rows cannot be started — the campaign-start
+    validation gate checks this and returns 422 with a clear message.
+
+    subject_line and email_body support Jinja2-style merge tags:
+        {{first_name}}, {{company_name}}, and any key in Lead.custom_variables.
+    """
+
+    __tablename__ = "step_email"
+
+    email_id = Column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=_UUID_DEFAULT,
+        comment="Unique identifier for this email variant.",
+    )
+
+    step_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("sequence_step.step_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="FK to sequence_step — the step this variant belongs to.",
+    )
+
+    subject_line = Column(
+        String(998),  # RFC 2822 max subject length
+        nullable=False,
+        comment="Email subject — supports {{merge_tag}} template variables.",
+    )
+
+    email_body = Column(
+        Text,
+        nullable=False,
+        comment="HTML or plain-text email body — supports {{merge_tag}} variables.",
+    )
+
+    # The display name used in the From header (e.g. "Sarah from Acme Corp").
+    # If NULL the SenderAccount's configured name is used.
+    from_name = Column(
+        String(255),
+        nullable=True,
+        comment="Display name for the From header. NULL = use sender_account default.",
+    )
+
+    # NULL  = rotation pool (engine selects the next available account).
+    # set   = always use this specific mailbox for this variant.
+    sender_account_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("sender_account.account_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to sender_account — NULL = rotation pool, set = pinned mailbox.",
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp when this email variant was created.",
+    )
+
+    # --- Relationships ---
+    step = relationship("SequenceStep", back_populates="email_variants")
+    sender_account = relationship("SenderAccount", foreign_keys=[sender_account_id])
+
+
+# ===========================================================================
+# CAMPAIGN EXECUTION CLUSTER
+# ===========================================================================
+
+
+class CampaignRun(Base):
+    """
+    An immutable record of a single campaign lifecycle transition.
+
+    One row is appended each time a campaign is started, paused, resumed,
+    stopped, or completes naturally.  This gives a full execution history
+    without mutating the Campaign row itself.
+
+    triggered_by stores the user who caused the transition; it is SET NULL
+    if the user is later deleted (e.g. for scheduler-triggered completions it
+    may also be NULL from the start).
+
+    Valid action values:  started | paused | resumed | stopped | completed
+    Valid run_status values: running | paused | stopped | completed | error
+    """
+
+    __tablename__ = "campaign_run"
+
+    run_id = Column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=_UUID_DEFAULT,
+        comment="Unique identifier for this execution event.",
+    )
+
+    campaign_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("campaign.campaign_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="FK to campaign — which campaign this event belongs to.",
+    )
+
+    # The user who triggered this transition (NULL for scheduler-triggered events).
+    triggered_by = Column(
+        UUID(as_uuid=False),
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to users — who triggered this transition. NULL for automated events.",
+    )
+
+    # Allowed: started | paused | resumed | stopped | completed
+    action = Column(
+        String(30),
+        nullable=False,
+        comment="The lifecycle action performed: started | paused | resumed | stopped | completed.",
+    )
+
+    # Snapshot of the campaign status after this action.
+    # Allowed: running | paused | stopped | completed | error
+    run_status = Column(
+        String(30),
+        nullable=False,
+        comment="Campaign status after this action: running | paused | stopped | completed | error.",
+    )
+
+    started_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when sending began for this run (set on 'started' action).",
+    )
+
+    ended_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when this run ended (set on stopped/completed/error).",
+    )
+
+    # Non-NULL only when run_status is 'error'.
+    error_message = Column(
+        Text,
+        nullable=True,
+        comment="Error description when run_status is 'error'.",
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp when this run record was created.",
+    )
+
+    # --- Relationships ---
+    campaign = relationship("Campaign", back_populates="runs")
+    actor = relationship("User", foreign_keys=[triggered_by])
