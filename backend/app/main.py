@@ -25,6 +25,19 @@ _ENV_PATH = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
 load_dotenv(dotenv_path=_ENV_PATH)
 
 FRONTEND_URL: str = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+FRONTEND_URLS_RAW: str = os.environ.get("FRONTEND_URLS", "")
+
+
+def _build_allowed_origins() -> list[str]:
+    origins = {FRONTEND_URL.rstrip("/")}
+    if FRONTEND_URLS_RAW.strip():
+        for origin in FRONTEND_URLS_RAW.split(","):
+            cleaned = origin.strip().rstrip("/")
+            if cleaned:
+                origins.add(cleaned)
+    # Dev-friendly defaults to avoid localhost vs 127.0.0.1 mismatch issues.
+    origins.update({"http://localhost:3000", "http://127.0.0.1:3000"})
+    return sorted(origins)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -44,8 +57,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    # In production, replace with the actual frontend origin(s).
-    allow_origins=[FRONTEND_URL],
+    # In production, set FRONTEND_URL/FRONTEND_URLS to trusted origin(s).
+    allow_origins=_build_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

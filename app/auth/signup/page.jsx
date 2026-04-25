@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, Home, Inbox, Mail, Send, Sparkles, TrendingUp, AlertCircle } from "lucide-react";
+import DatePickerPopover from "@/components/ui/DatePickerPopover";
+import GenderSelect from "@/components/ui/GenderSelect";
 
 function GoogleIcon({ className = "h-5 w-5" }) {
   return (
@@ -424,61 +426,27 @@ export default function SignupPage() {
                       <label htmlFor="dob" className="mb-2 block text-sm font-medium text-slate-700">
                         Date of birth
                       </label>
-                      <div className={`relative ${errors.dob ? "animate-shake" : ""}`}>
-                        <input
-                          id="dob"
-                          name="dob"
-                          type="date"
-                          value={formData.dob}
-                          onChange={(e) => updateField("dob", e.target.value)}
-                          onBlur={() => validateSignupField("dob")}
-                          className={`h-12 w-full rounded-xl border bg-white px-4 text-sm outline-none transition [color-scheme:light] ${
-                            errors.dob
-                              ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
-                              : "border-slate-200 text-slate-900 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
-                          }`}
-                        />
-                      </div>
-                      <div className={`grid transition-all duration-300 ease-in-out ${errors.dob ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
-                        <div className="overflow-hidden">
-                          <p className="text-xs text-red-600">{errors.dob}</p>
-                        </div>
-                      </div>
+                      <DatePickerPopover
+                        id="dob"
+                        value={formData.dob}
+                        onChange={(v) => updateField("dob", v)}
+                        onBlur={() => validateSignupField("dob")}
+                        error={errors.dob}
+                        placeholder="Select your birth date"
+                      />
                     </div>
 
                     <div>
                       <label htmlFor="gender" className="mb-2 block text-sm font-medium text-slate-700">
                         Gender
                       </label>
-                      <div className={`relative ${errors.gender ? "animate-shake" : ""}`}>
-                        <select
-                          id="gender"
-                          name="gender"
-                          value={formData.gender}
-                          onChange={(e) => updateField("gender", e.target.value)}
-                          onBlur={() => validateSignupField("gender")}
-                          className={`h-12 w-full cursor-pointer appearance-none rounded-xl border bg-white px-4 pr-10 text-sm outline-none transition ${
-                            errors.gender
-                              ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
-                              : "border-slate-200 text-slate-900 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
-                          }`}
-                        >
-                          <option value="">Select an option</option>
-                          <option value="male">Male</option>
-                          <option value="female">Female</option>
-                          <option value="prefer_not">Prefer not to say</option>
-                        </select>
-                        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </span>
-                      </div>
-                      <div className={`grid transition-all duration-300 ease-in-out ${errors.gender ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
-                        <div className="overflow-hidden">
-                          <p className="text-xs text-red-600">{errors.gender}</p>
-                        </div>
-                      </div>
+                      <GenderSelect
+                        id="gender"
+                        value={formData.gender}
+                        onChange={(v) => updateField("gender", v)}
+                        onBlur={() => validateSignupField("gender")}
+                        error={errors.gender}
+                      />
                     </div>
 
                     <button
