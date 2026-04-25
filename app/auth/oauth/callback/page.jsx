@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 
 function parseHashPayload() {
   const raw = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
@@ -29,7 +30,15 @@ export default function OAuthCallbackPage() {
     setEmail(payload.email);
     setHydrated(true);
     if (payload.accessToken) {
-      router.replace("/dashboard");
+      const fallbackName = (payload.email || "").split("@")[0] || "User";
+      window.sessionStorage.setItem("dashboard_welcome_pending", "1");
+      window.sessionStorage.setItem("dashboard_welcome_name", fallbackName);
+      toast.success("Welcome back!");
+      const nextQuery = new URLSearchParams({
+        login_type: "google",
+        welcome_name: fallbackName,
+      });
+      router.replace(`/dashboard?${nextQuery.toString()}`);
     }
   }, [router]);
 

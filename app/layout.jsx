@@ -1,5 +1,7 @@
 import "./globals.css";
 import { Inter } from "next/font/google";
+import ThemeProvider from "@/components/providers/ThemeProvider";
+import AppToaster from "@/components/providers/AppToaster";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -15,8 +17,13 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${inter.className} transition-colors duration-300`}>
+        <ThemeProvider>
+          {children}
+          <AppToaster />
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
