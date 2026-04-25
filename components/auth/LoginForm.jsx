@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { X, Home, Inbox, Mail, Send, Sparkles, TrendingUp, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { X, Home, Inbox, Mail, Send, TrendingUp, Eye, EyeOff, AlertCircle } from "lucide-react";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -113,8 +113,23 @@ export default function LoginForm() {
         throw new Error("Login failed");
       }
 
-      await response.json();
-      router.replace("/dashboard");
+      let loginPayload = null;
+      try {
+        loginPayload = await response.json();
+      } catch {
+        loginPayload = null;
+      }
+      const firstName =
+        loginPayload?.first_name ||
+        loginPayload?.firstName ||
+        loginPayload?.user?.first_name ||
+        loginPayload?.user?.firstName ||
+        (loginPayload?.user?.name ? String(loginPayload.user.name).split(" ")[0] : "") ||
+        "";
+
+      const safeFirstName = String(firstName).trim() || "there";
+      window.sessionStorage.setItem("welcomeFirstName", safeFirstName);
+      router.replace("/dashboard/email-accounts");
     } catch {
       setLoginMessage("Something went wrong. Please try again.");
     } finally {
@@ -171,7 +186,7 @@ export default function LoginForm() {
   }
 
   return (
-    <main className="min-h-screen lg:h-screen lg:overflow-hidden bg-white font-sans text-slate-900 antialiased">
+    <main className="relative min-h-screen lg:h-screen lg:overflow-hidden bg-white font-sans text-slate-900 antialiased">
       <div className="flex min-h-screen lg:h-screen">
         {/* Left: form */}
         <section className="relative flex w-full lg:w-1/2 xl:w-[55%] flex-col lg:overflow-y-auto">
