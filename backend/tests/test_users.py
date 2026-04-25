@@ -33,7 +33,7 @@ External calls are fully mocked:
 """
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from itsdangerous import SignatureExpired
@@ -153,6 +153,87 @@ def test_signup_first_name_too_short(client):
     resp = client.post("/auth/signup", json=_payload(first_name="A"))
     assert resp.status_code == 422
 
+
+def test_signup_google_only_email_triggers_account_link_flow(client, db, mocker):
+    from app.models import OAuthAccount, User
+
+    google_email = _unique_email()
+    user = User(
+        user_id=str(uuid.uuid4()),
+        first_name="Google",
+        last_name="Only",
+        email=google_email,
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    db.add(
+        OAuthAccount(
+            id=str(uuid.uuid4()),
+            user_id=user.user_id,
+            provider_type="google",
+            provider_id=f"google_sub_{uuid.uuid4().hex}",
+            access_token="at_tok",
+        )
+    )
+    db.commit()
+
+    mocked_sender = mocker.patch("app.routers.users.send_account_link_email", return_value=None)
+    resp = client.post("/auth/signup", json=_payload(email=google_email))
+    assert resp.status_code == 409
+    assert "google account" in resp.json()["detail"].lower()
+
+    from app.models import LocalAuth
+    local_auth = db.query(LocalAuth).filter(LocalAuth.user_id == user.user_id).first()
+    assert local_auth is not None
+    assert local_auth.password_hash is None
+    assert local_auth.verification_token is not None
+    assert local_auth.reset_token is not None
+    mocked_sender.assert_called_once()
+
+
+def test_link_local_account_sets_password_only_after_verification(client, db, mocker):
+    from app.auth import verify_password
+    from app.models import LocalAuth, OAuthAccount, User
+
+    email = _unique_email()
+    user = User(
+        user_id=str(uuid.uuid4()),
+        first_name="Link",
+        last_name="Target",
+        email=email,
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    db.add(
+        OAuthAccount(
+            id=str(uuid.uuid4()),
+            user_id=user.user_id,
+            provider_type="google",
+            provider_id=f"google_sub_{uuid.uuid4().hex}",
+            access_token="at_tok",
+        )
+    )
+    db.commit()
+
+    mocker.patch("app.routers.users.send_account_link_email", return_value=None)
+    signup_resp = client.post("/auth/signup", json=_payload(email=email, password="LinkedPass1!"))
+    assert signup_resp.status_code == 409
+
+    local_auth = db.query(LocalAuth).filter(LocalAuth.user_id == user.user_id).first()
+    assert local_auth.password_hash is None
+    link_token = local_auth.verification_token
+
+    link_resp = client.get(f"/auth/link-local-account?token={link_token}", follow_redirects=False)
+    assert link_resp.status_code == 307
+    assert "status=success" in link_resp.headers["location"]
+
+    db.refresh(local_auth)
+    assert local_auth.password_hash is not None
+    assert verify_password("LinkedPass1!", local_auth.password_hash)
+    assert local_auth.verification_token is None
+    assert local_auth.reset_token is None
 
 # ===========================================================================
 # Email verification tests
@@ -388,3 +469,225 @@ def test_google_callback_existing_user(client, db, mocker):
     assert len(oauth_rows) == 1, (
         "Calling /google/callback twice for the same sub must not create duplicate rows"
     )
+
+
+def test_login_without_remember_me_sets_session_cookie(client, db, mocker):
+    from app.models import User
+
+    mocker.patch("app.routers.users.send_verification_email", return_value=None)
+    payload = _payload()
+    signup = client.post("/auth/signup", json=payload)
+    assert signup.status_code == 201
+
+    user = db.query(User).filter(User.email == payload["email"]).first()
+    user.is_verified = True
+    db.commit()
+
+    resp = client.post(
+        "/auth/login",
+        json={"email": payload["email"], "password": payload["password"], "remember_me": False},
+    )
+    assert resp.status_code == 200
+    cookie_header = resp.headers.get("set-cookie", "").lower()
+    assert "access_token=" in cookie_header
+    assert "max-age" not in cookie_header
+
+
+def test_login_with_remember_me_sets_three_day_cookie(client, db, mocker):
+    from app.models import User
+
+    mocker.patch("app.routers.users.send_verification_email", return_value=None)
+    payload = _payload()
+    signup = client.post("/auth/signup", json=payload)
+    assert signup.status_code == 201
+
+    user = db.query(User).filter(User.email == payload["email"]).first()
+    user.is_verified = True
+    db.commit()
+
+    resp = client.post(
+        "/auth/login",
+        json={"email": payload["email"], "password": payload["password"], "remember_me": True},
+    )
+    assert resp.status_code == 200
+    cookie_header = resp.headers.get("set-cookie", "").lower()
+    assert "access_token=" in cookie_header
+    assert "max-age=259200" in cookie_header
+
+
+def test_reset_password_request_sets_reset_token_and_sends_email(client, db, mocker):
+    from app.auth import hash_password
+    from app.models import LocalAuth, User
+
+    email = _unique_email()
+    user = User(
+        user_id=str(uuid.uuid4()),
+        first_name="Reset",
+        last_name="User",
+        email=email,
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    db.add(LocalAuth(user_id=user.user_id, password_hash=hash_password("SecurePass1!")))
+    db.commit()
+
+    mocked_sender = mocker.patch("app.routers.users.send_password_reset_email", return_value=None)
+    resp = client.post("/auth/reset-password", json={"email": email})
+    assert resp.status_code == 200
+
+    local_auth = db.query(LocalAuth).filter(LocalAuth.user_id == user.user_id).first()
+    assert local_auth.reset_token is not None
+    assert local_auth.reset_expires_at is not None
+    mocked_sender.assert_called_once()
+
+
+def test_reset_password_confirm_updates_password(client, db):
+    from app.auth import hash_password, verify_password
+    from app.models import LocalAuth, User
+
+    user = User(
+        user_id=str(uuid.uuid4()),
+        first_name="Reset",
+        last_name="User",
+        email=_unique_email(),
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    reset_token = "tok_reset_12345678"
+    db.add(
+        LocalAuth(
+            user_id=user.user_id,
+            password_hash=hash_password("OldPass1!"),
+            reset_token=reset_token,
+            reset_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        )
+    )
+    db.commit()
+
+    resp = client.post(
+        "/auth/reset-password/confirm",
+        json={"token": reset_token, "new_password": "NewPass1!", "confirm_password": "NewPass1!"},
+    )
+    assert resp.status_code == 200
+
+    local_auth = db.query(LocalAuth).filter(LocalAuth.user_id == user.user_id).first()
+    assert local_auth.reset_token is None
+    assert local_auth.reset_expires_at is None
+    assert verify_password("NewPass1!", local_auth.password_hash)
+
+
+def test_reset_password_confirm_rejects_reused_password(client, db):
+    from app.auth import hash_password
+    from app.models import LocalAuth, User
+
+    current_password = "ReusePass1!"
+    user = User(
+        user_id=str(uuid.uuid4()),
+        first_name="Reset",
+        last_name="User",
+        email=_unique_email(),
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    reset_token = "tok_reset_reuse_12345"
+    db.add(
+        LocalAuth(
+            user_id=user.user_id,
+            password_hash=hash_password(current_password),
+            reset_token=reset_token,
+            reset_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        )
+    )
+    db.commit()
+
+    resp = client.post(
+        "/auth/reset-password/confirm",
+        json={"token": reset_token, "new_password": current_password, "confirm_password": current_password},
+    )
+    assert resp.status_code == 400
+    assert "different from your current password" in resp.json()["detail"].lower()
+
+
+def test_reset_password_confirm_rejects_mismatched_confirm_password(client, db):
+    from app.auth import hash_password
+    from app.models import LocalAuth, User
+
+    user = User(
+        user_id=str(uuid.uuid4()),
+        first_name="Reset",
+        last_name="User",
+        email=_unique_email(),
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    reset_token = "tok_reset_mismatch_12345"
+    db.add(
+        LocalAuth(
+            user_id=user.user_id,
+            password_hash=hash_password("OldPass1!"),
+            reset_token=reset_token,
+            reset_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        )
+    )
+    db.commit()
+
+    resp = client.post(
+        "/auth/reset-password/confirm",
+        json={
+            "token": reset_token,
+            "new_password": "NewPass1!",
+            "confirm_password": "DifferentPass1!",
+        },
+    )
+    assert resp.status_code == 422
+    assert "must match" in str(resp.json()).lower()
+
+
+def test_reset_password_token_is_revoked_after_successful_update(client, db):
+    from app.auth import hash_password
+    from app.models import LocalAuth, User
+
+    user = User(
+        user_id=str(uuid.uuid4()),
+        first_name="Reset",
+        last_name="User",
+        email=_unique_email(),
+        is_verified=True,
+    )
+    db.add(user)
+    db.flush()
+    reset_token = "tok_reset_one_time_12345"
+    db.add(
+        LocalAuth(
+            user_id=user.user_id,
+            password_hash=hash_password("OldPass1!"),
+            reset_token=reset_token,
+            reset_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        )
+    )
+    db.commit()
+
+    first = client.post(
+        "/auth/reset-password/confirm",
+        json={
+            "token": reset_token,
+            "new_password": "BrandNew1!",
+            "confirm_password": "BrandNew1!",
+        },
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        "/auth/reset-password/confirm",
+        json={
+            "token": reset_token,
+            "new_password": "AnotherNew1!",
+            "confirm_password": "AnotherNew1!",
+        },
+    )
+    assert second.status_code == 400
+    assert "invalid reset token" in second.json()["detail"].lower()
