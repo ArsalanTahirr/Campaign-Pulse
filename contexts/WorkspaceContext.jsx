@@ -74,8 +74,9 @@ export function WorkspaceProvider({ children }) {
         if (!meRes.ok) return;
         const me = await meRes.json();
         const mine = collabs.find((c) => c.user_id === me.user_id);
-        if (active && mine?.roles?.length > 0) {
-          setRole(mine.roles[0].name);
+        const resolvedRole = mine?.role?.name || mine?.roles?.[0]?.name || null;
+        if (active) {
+          setRole(resolvedRole);
         }
       } catch {
         // Non-fatal — role stays null

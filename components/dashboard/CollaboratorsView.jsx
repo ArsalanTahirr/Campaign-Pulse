@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import PermissionGate from "@/components/ui/PermissionGate";
+import { messageFromApiErrorBody } from "@/utils/apiError";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -58,7 +59,7 @@ function InviteModal({ workspaceId, onInvited, onClose }) {
           }
         } else {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || "Failed to load roles.");
+          throw new Error(messageFromApiErrorBody(err, "Failed to load roles."));
         }
       } catch (err) {
         setRoles([]);
@@ -84,7 +85,7 @@ function InviteModal({ workspaceId, onInvited, onClose }) {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to send invitation.");
+        throw new Error(messageFromApiErrorBody(err, "Failed to send invitation."));
       }
       const inv = await res.json();
       toast.success(`Invitation sent to ${inv.invitee_email}`);
@@ -213,7 +214,7 @@ export default function CollaboratorsView() {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to cancel invitation.");
+        throw new Error(messageFromApiErrorBody(err, "Failed to cancel invitation."));
       }
       toast.success("Invitation cancelled.");
       setInvitations((prev) => prev.filter((i) => i.invitation_id !== invId));
@@ -233,7 +234,7 @@ export default function CollaboratorsView() {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to remove collaborator.");
+        throw new Error(messageFromApiErrorBody(err, "Failed to remove collaborator."));
       }
       toast.success("Collaborator removed.");
       setCollaborators((prev) => prev.filter((c) => c.collaborator_id !== collabId));
@@ -313,7 +314,8 @@ export default function CollaboratorsView() {
                 <div />
               </div>
               {collaborators.map((collab) => {
-                const roleName = collab.roles[0]?.name || "—";
+                // Backward-compatible: support both legacy `roles[]` and new `role`.
+                const roleName = collab.role?.name || collab.roles?.[0]?.name || "—";
                 return (
                   <div
                     key={collab.collaborator_id}

@@ -38,6 +38,21 @@ def get_lead_or_404(lead_id: str, campaign_id: str, db: Session) -> Lead:
     return lead
 
 
+def _assert_campaign_not_completed_or_deleted(campaign_id: str, db: Session) -> None:
+    campaign_status = (
+        db.query(Campaign.status)
+        .filter(Campaign.campaign_id == campaign_id)
+        .scalar()
+    )
+    if not campaign_status:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found.")
+    if campaign_status in {"completed", "deleted"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Completed or deleted campaigns are view-only for lead mutations.",
+        )
+
+
 def list_leads(
     campaign_id: str,
     db: Session,
@@ -61,6 +76,7 @@ def create_lead(
     custom_variables: Optional[dict],
     db: Session,
 ) -> Lead:
+    _assert_campaign_not_completed_or_deleted(campaign_id, db)
     try:
         lead = Lead(
             lead_id=str(uuid.uuid4()),
@@ -84,6 +100,7 @@ def create_lead(
 
 
 def update_lead(lead_id: str, campaign_id: str, updates: dict, db: Session) -> Lead:
+    _assert_campaign_not_completed_or_deleted(campaign_id, db)
     lead = get_lead_or_404(lead_id, campaign_id, db)
     # Map the API field `status` to the ORM column `lead_status`
     if "status" in updates:
@@ -97,6 +114,7 @@ def update_lead(lead_id: str, campaign_id: str, updates: dict, db: Session) -> L
 
 
 def delete_lead(lead_id: str, campaign_id: str, db: Session) -> None:
+    _assert_campaign_not_completed_or_deleted(campaign_id, db)
     lead = get_lead_or_404(lead_id, campaign_id, db)
     db.delete(lead)
     db.commit()
@@ -140,6 +158,7 @@ async def import_leads_from_file(
     file: UploadFile,
     db: Session,
 ) -> LeadImportSession:
+    _assert_campaign_not_completed_or_deleted(campaign_id, db)
     content_type = file.content_type or ""
     if content_type not in ALLOWED_MIME_TYPES and not file.filename.endswith((".csv", ".xlsx")):
         raise HTTPException(

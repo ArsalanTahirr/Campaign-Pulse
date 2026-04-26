@@ -3,7 +3,7 @@ dependencies/permissions.py — RBAC permission gate for CampaignPulse.
 
 ORM key names used here:
   Collaborator.member_id    (PK, not collaborator_id)
-  CollaboratorRole.member_id (FK, not collaborator_id)
+  Collaborator.role_id      (single-role model)
   Role.role_name             (not .name)
 """
 
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user
-from app.models import Collaborator, CollaboratorRole, Role, User
+from app.models import Collaborator, Role, User
 
 # ---------------------------------------------------------------------------
 # Permission matrix
@@ -52,8 +52,7 @@ def _get_user_role_in_workspace(
     """Return the role name for `user_id` in `workspace_id`, or None."""
     row = (
         db.query(Role.role_name)
-        .join(CollaboratorRole, CollaboratorRole.role_id == Role.role_id)
-        .join(Collaborator, Collaborator.member_id == CollaboratorRole.member_id)
+        .join(Collaborator, Collaborator.role_id == Role.role_id)
         .filter(
             Collaborator.user_id == user_id,
             Collaborator.workspace_id == workspace_id,

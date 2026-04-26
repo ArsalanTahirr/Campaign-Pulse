@@ -79,7 +79,7 @@ def test_signup_success(client, mocker):
 
 
 def test_signup_creates_default_owner_workspace(client, db, mocker):
-    from app.models import Collaborator, CollaboratorRole, Role, User
+    from app.models import Collaborator, Role, User
 
     mocker.patch("app.routers.users.send_verification_email", return_value=None)
     email = _unique_email()
@@ -91,8 +91,7 @@ def test_signup_creates_default_owner_workspace(client, db, mocker):
 
     owner_membership = (
         db.query(Collaborator)
-        .join(CollaboratorRole, CollaboratorRole.member_id == Collaborator.member_id)
-        .join(Role, Role.role_id == CollaboratorRole.role_id)
+        .join(Role, Role.role_id == Collaborator.role_id)
         .filter(
             Collaborator.user_id == user.user_id,
             Collaborator.invite_status == "accepted",
@@ -413,7 +412,7 @@ def test_google_callback_new_user(client, db, mocker):
     A brand-new Google identity should create a User + OAuthAccount row and
     return a valid TokenResponse.
     """
-    from app.models import Collaborator, CollaboratorRole, OAuthAccount, Role, User
+    from app.models import Collaborator, OAuthAccount, Role, User
 
     google_sub = f"google_sub_{uuid.uuid4().hex}"
     google_email = _unique_email()
@@ -452,8 +451,7 @@ def test_google_callback_new_user(client, db, mocker):
 
     owner_membership = (
         db.query(Collaborator)
-        .join(CollaboratorRole, CollaboratorRole.member_id == Collaborator.member_id)
-        .join(Role, Role.role_id == CollaboratorRole.role_id)
+        .join(Role, Role.role_id == Collaborator.role_id)
         .filter(
             Collaborator.user_id == user.user_id,
             Collaborator.invite_status == "accepted",

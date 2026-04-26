@@ -4,6 +4,7 @@ export const metadata = {
   title: "Campaign — Campaign Pulse",
 };
 
-export default function CampaignDetailPage({ params }) {
-  return <CampaignDetailView campaignId={params.campaign_id} />;
+export default async function CampaignDetailPage({ params }) {
+  const { campaign_id } = await params;
+  return <CampaignDetailView campaignId={campaign_id} />;
 }

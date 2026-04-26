@@ -11,15 +11,16 @@ from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Campaign, CampaignRun, Collaborator, Lead, SequenceStep, StepEmail
+from app.models import Campaign, CampaignRun, CampaignSenderPool, Collaborator, Lead, SequenceStep, StepEmail
 from app.services.audit_log_service import write_audit_log
 
 VALID_TRANSITIONS: dict[str, dict] = {
-    "started": {"from": {"draft", "scheduled", "paused"}, "to": "active", "run_status": "active"},
+    "started": {"from": {"draft", "scheduled", "paused"}, "to": "active", "run_status": "running"},
     "paused": {"from": {"active"}, "to": "paused", "run_status": "paused"},
-    "resumed": {"from": {"paused"}, "to": "active", "run_status": "active"},
+    "resumed": {"from": {"paused"}, "to": "active", "run_status": "running"},
     "stopped": {"from": {"active", "paused"}, "to": "completed", "run_status": "completed"},
 }
 
@@ -34,6 +35,18 @@ def _normalize_status(status_value: str) -> str:
 
 
 def _assert_has_email_variants(campaign_id: str, db: Session) -> None:
+    step_count = (
+        db.query(func.count(SequenceStep.step_id))
+        .filter(SequenceStep.campaign_id == campaign_id)
+        .scalar()
+        or 0
+    )
+    if step_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Campaign must have at least one step before starting.",
+        )
+
     steps_without_emails = (
         db.query(SequenceStep)
         .filter(SequenceStep.campaign_id == campaign_id)
@@ -52,12 +65,27 @@ def _assert_has_email_variants(campaign_id: str, db: Session) -> None:
         )
 
 
+def _assert_has_sender_pool(campaign_id: str, db: Session) -> None:
+    sender_count = (
+        db.query(func.count(CampaignSenderPool.sender_account_id))
+        .filter(CampaignSenderPool.campaign_id == campaign_id)
+        .scalar()
+        or 0
+    )
+    if sender_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Campaign must have at least one sender account before starting.",
+        )
+
+
 def get_campaign_or_404(campaign_id: str, workspace_id: str, db: Session) -> Campaign:
     campaign = (
         db.query(Campaign)
         .filter(
             Campaign.campaign_id == campaign_id,
             Campaign.workspace_id == workspace_id,
+            Campaign.status != "deleted",
         )
         .first()
     )
@@ -69,7 +97,7 @@ def get_campaign_or_404(campaign_id: str, workspace_id: str, db: Session) -> Cam
 def list_campaigns(workspace_id: str, db: Session) -> list[dict]:
     campaigns = (
         db.query(Campaign)
-        .filter(Campaign.workspace_id == workspace_id)
+        .filter(Campaign.workspace_id == workspace_id, Campaign.status != "deleted")
         .order_by(Campaign.created_at.desc())
         .all()
     )
@@ -88,7 +116,7 @@ def list_campaigns(workspace_id: str, db: Session) -> list[dict]:
             # Use campaign_name — the schema maps it to `name` via validation_alias
             "campaign_name": c.campaign_name,
             "status": _normalize_status(c.status),
-            "schedule": c.schedule,
+            "timezone": c.timezone,
             "start_date": c.start_date,
             "end_date": c.end_date,
             "created_at": c.created_at,
@@ -103,25 +131,33 @@ def create_campaign(
     workspace_id: str,
     creator_member_id: Optional[str],
     name: str,
-    schedule: Optional[dict],
+    timezone: str,
     start_date: Optional[datetime],
     end_date: Optional[datetime],
     db: Session,
 ) -> Campaign:
-    campaign = Campaign(
-        campaign_id=str(uuid.uuid4()),
-        workspace_id=workspace_id,
-        created_by=creator_member_id,
-        campaign_name=name,
-        status="draft",
-        schedule=schedule,
-        start_date=start_date,
-        end_date=end_date,
-    )
-    db.add(campaign)
-    db.commit()
-    db.refresh(campaign)
-    return campaign
+    try:
+        campaign = Campaign(
+            campaign_id=str(uuid.uuid4()),
+            workspace_id=workspace_id,
+            created_by=creator_member_id,
+            campaign_name=name,
+            status="draft",
+            timezone=timezone,
+            schedule=None,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        db.add(campaign)
+        db.commit()
+        db.refresh(campaign)
+        return campaign
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f'A campaign named "{name}" already exists in this workspace.',
+        )
 
 
 def update_campaign(
@@ -131,6 +167,12 @@ def update_campaign(
     db: Session,
 ) -> Campaign:
     campaign = get_campaign_or_404(campaign_id, workspace_id, db)
+    if campaign.status in {"completed", "deleted"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Completed or deleted campaigns are view-only and cannot be edited.",
+        )
+    updates.pop("schedule", None)
     # Map `name` from request to ORM column `campaign_name`
     if "name" in updates:
         campaign.campaign_name = updates.pop("name")
@@ -138,14 +180,22 @@ def update_campaign(
         if value is not None and hasattr(campaign, field):
             setattr(campaign, field, value)
     campaign.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another campaign with this name already exists in this workspace.",
+        )
     db.refresh(campaign)
     return campaign
 
 
 def delete_campaign(campaign_id: str, workspace_id: str, db: Session) -> None:
     campaign = get_campaign_or_404(campaign_id, workspace_id, db)
-    db.delete(campaign)
+    campaign.status = "deleted"
+    campaign.updated_at = datetime.now(timezone.utc)
     db.commit()
 
 
@@ -177,6 +227,7 @@ def transition_campaign(
 
     if action == "started":
         _assert_has_email_variants(campaign_id, db)
+        _assert_has_sender_pool(campaign_id, db)
 
     old_status = current_status
     campaign.status = transition["to"]

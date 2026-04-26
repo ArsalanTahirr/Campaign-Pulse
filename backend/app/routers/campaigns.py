@@ -59,7 +59,7 @@ def create_campaign(
         workspace_id=workspace_id,
         creator_member_id=member_id,
         name=body.name,
-        schedule=body.schedule,
+        timezone=body.timezone,
         start_date=body.start_date,
         end_date=body.end_date,
         db=db,

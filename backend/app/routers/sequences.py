@@ -125,7 +125,6 @@ def create_variant(
         subject_line=body.subject_line,
         email_body=body.email_body,
         from_name=body.from_name,
-        sender_account_id=body.sender_account_id,
         db=db,
     )
 

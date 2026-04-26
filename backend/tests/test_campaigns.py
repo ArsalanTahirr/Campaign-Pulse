@@ -5,9 +5,11 @@ tests/test_campaigns.py — Campaign CRUD + lifecycle transition tests.
 import pytest
 from tests.factories import (
     add_member,
+    attach_sender_to_campaign,
     auth_cookies,
     make_campaign,
     make_role,
+    make_sender_account,
     make_step,
     make_step_email,
     make_user,
@@ -142,6 +144,8 @@ def test_start_draft_campaign(client, db, owner, ws):
     campaign = make_campaign(db, ws.workspace_id, status="draft")
     step = make_step(db, campaign.campaign_id)
     make_step_email(db, step.step_id)
+    sender = make_sender_account(db, ws.workspace_id)
+    attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
 
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
@@ -149,13 +153,15 @@ def test_start_draft_campaign(client, db, owner, ws):
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 201
-    assert res.json()["run_status"] == "active"
+    assert res.json()["run_status"] == "running"
 
 
 def test_start_campaign_no_variants_fails(client, db, owner, ws):
     """A campaign with steps but no email variants cannot be started."""
     campaign = make_campaign(db, ws.workspace_id, status="draft")
     make_step(db, campaign.campaign_id)  # step has no email_variants
+    sender = make_sender_account(db, ws.workspace_id)
+    attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
 
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
@@ -164,6 +170,34 @@ def test_start_campaign_no_variants_fails(client, db, owner, ws):
     )
     assert res.status_code == 422
     assert "no email variants" in res.json()["detail"].lower()
+
+
+def test_start_campaign_without_steps_fails(client, db, owner, ws):
+    campaign = make_campaign(db, ws.workspace_id, status="draft")
+    sender = make_sender_account(db, ws.workspace_id)
+    attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
+
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
+        json={"action": "started"},
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
+    assert "at least one step" in res.json()["detail"].lower()
+
+
+def test_start_campaign_without_sender_pool_fails(client, db, owner, ws):
+    campaign = make_campaign(db, ws.workspace_id, status="draft")
+    step = make_step(db, campaign.campaign_id)
+    make_step_email(db, step.step_id)
+
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
+        json={"action": "started"},
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
+    assert "sender account" in res.json()["detail"].lower()
 
 
 def test_pause_running_campaign(client, db, owner, ws):

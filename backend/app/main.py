@@ -27,6 +27,24 @@ load_dotenv(dotenv_path=_ENV_PATH)
 
 FRONTEND_URL: str = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
+
+def _cors_allow_origins() -> list[str]:
+    """Allow the configured origin plus localhost ↔ 127.0.0.1 swap (common dev mismatch)."""
+    origins: set[str] = set()
+    primary = FRONTEND_URL.strip() or "http://localhost:3000"
+    origins.add(primary.rstrip("/"))
+    if "localhost" in primary:
+        origins.add(primary.replace("localhost", "127.0.0.1").rstrip("/"))
+    if "127.0.0.1" in primary:
+        origins.add(primary.replace("127.0.0.1", "localhost").rstrip("/"))
+    extra = os.environ.get("FRONTEND_URLS", "")
+    for part in extra.split(","):
+        p = part.strip().rstrip("/")
+        if p:
+            origins.add(p)
+    return sorted(origins)
+
+
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
@@ -45,8 +63,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    # In production, replace with the actual frontend origin(s).
-    allow_origins=[FRONTEND_URL],
+    allow_origins=_cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

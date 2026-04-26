@@ -13,7 +13,6 @@ from sqlalchemy import text
 
 from app.models import (
     Collaborator,
-    CollaboratorRole,
     Invitation,
     Role,
     User,
@@ -208,22 +207,18 @@ def accept_invitation(token: str, accepting_user_id: str, db: Session) -> Worksp
 
     if existing:
         existing.invite_status = "accepted"
+        existing.role_id = inv.role_id
         collab = existing
     else:
         collab = Collaborator(
             member_id=str(uuid.uuid4()),
             workspace_id=inv.workspace_id,
             user_id=accepting_user_id,
+            role_id=inv.role_id,
             invite_status="accepted",
         )
         db.add(collab)
         db.flush()
-
-    collab_role = CollaboratorRole(
-        member_id=collab.member_id,
-        role_id=inv.role_id,
-    )
-    db.add(collab_role)
 
     inv.status = "accepted"
     inv.responded_at = datetime.now(timezone.utc)

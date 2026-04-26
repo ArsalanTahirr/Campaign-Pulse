@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_permission
-from app.models import Collaborator, CollaboratorRole, User
+from app.models import Collaborator, User
 from app.schemas.collaborator import CollaboratorOut, CollaboratorRoleUpdate, RoleOut
 from app.services import collaborator_service
 
@@ -32,11 +32,7 @@ def _to_out(collab: Collaborator) -> CollaboratorOut:
         full_name = f"{first} {last}".strip() or None
         email = collab.user.email
 
-    roles = [
-        RoleOut.model_validate(cr.role)
-        for cr in (collab.role_assignments or [])
-        if cr.role
-    ]
+    role = RoleOut.model_validate(collab.role) if collab.role else None
 
     return CollaboratorOut(
         member_id=collab.member_id,      # maps to `collaborator_id` via validation_alias
@@ -46,7 +42,7 @@ def _to_out(collab: Collaborator) -> CollaboratorOut:
         joined_at=collab.joined_at,
         full_name=full_name,
         email=email,
-        roles=roles,
+        role=role,
     )
 
 

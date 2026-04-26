@@ -31,9 +31,11 @@ Cascade rules:
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -155,6 +157,11 @@ class User(Base):
         comment="UTC timestamp when this account was first created.",
     )
 
+    __table_args__ = (
+        # Enforce case-insensitive uniqueness (alice@x.com == ALICE@x.com).
+        Index("uq_users_email_lower", text("lower(email)"), unique=True),
+    )
+
     # --- Relationships ---
     # One User → one LocalAuth row (traditional password login).
     # uselist=False signals a scalar (not a list) — SQLAlchemy will load a
@@ -181,7 +188,8 @@ class User(Base):
     )
 
     # One User → many Collaborator rows (can be a member of multiple workspaces).
-    # Ownership of a workspace is expressed via CollaboratorRole (Role.role_name = 'Owner'),
+    # Ownership of a workspace is expressed via Collaborator.role_id where
+    # role.role_name = 'Owner',
     # not by a direct FK on Workspace.  Use the collaborations relationship below
     # and filter by role to find workspaces this user owns.
     collaborations = relationship(
@@ -400,9 +408,9 @@ class Workspace(Base):
 
     All campaigns, sender accounts, and collaborators are scoped to a
     workspace.  Membership and access level — including ownership — are
-    expressed exclusively through the Collaborator + CollaboratorRole chain:
+    expressed through Collaborator.role_id:
 
-        Workspace → Collaborator → CollaboratorRole → Role (role_name = 'Owner')
+        Workspace → Collaborator(role_id) → Role (role_name = 'Owner')
 
     This design means a workspace has no hard-coded single owner column.
     Ownership is just a role assignment, which makes it trivial to support
@@ -412,8 +420,7 @@ class Workspace(Base):
     To find the owner(s) of a workspace at query time:
         SELECT c.user_id
         FROM collaborator c
-        JOIN collaborator_role cr ON cr.member_id = c.member_id
-        JOIN role r               ON r.role_id    = cr.role_id
+        JOIN role r ON r.role_id = c.role_id
         WHERE c.workspace_id = :wid
           AND r.role_name    = 'Owner'
     """
@@ -515,6 +522,13 @@ class Collaborator(Base):
         comment="FK to users — which user holds this membership.",
     )
 
+    role_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("role.role_id", ondelete="RESTRICT"),
+        nullable=False,
+        comment="FK to role — single role assigned to this collaborator membership.",
+    )
+
     # Lifecycle state of the invitation.
     # Allowed values: 'pending', 'accepted', 'declined'
     invite_status = Column(
@@ -540,18 +554,16 @@ class Collaborator(Base):
             "user_id",
             name="uq_collaborator_workspace_user",
         ),
+        CheckConstraint(
+            "invite_status IN ('pending','accepted','declined')",
+            name="ck_collaborator_invite_status",
+        ),
     )
 
     # --- Relationships ---
     workspace = relationship("Workspace", back_populates="collaborators")
     user = relationship("User", back_populates="collaborations")
-
-    # One Collaborator → many CollaboratorRole assignments.
-    role_assignments = relationship(
-        "CollaboratorRole",
-        back_populates="collaborator",
-        cascade="all, delete-orphan",
-    )
+    role = relationship("Role", back_populates="collaborators")
 
     # One Collaborator → many Campaigns they created.
     created_campaigns = relationship(
@@ -601,64 +613,8 @@ class Role(Base):
         comment="JSONB map of permission flags granted to holders of this role.",
     )
 
-    # One Role → many CollaboratorRole assignments.
-    assignments = relationship(
-        "CollaboratorRole",
-        back_populates="role",
-        cascade="all, delete-orphan",
-    )
-
-
-class CollaboratorRole(Base):
-    """
-    Junction table that assigns one or more Roles to a Collaborator.
-
-    This resolves the M:N relationship between Collaborator and Role.
-    The composite primary key (member_id, role_id) ensures a collaborator
-    cannot be assigned the same role twice.
-
-    Confirmed 2NF-clean: both assigned_at and assigned_by describe the
-    assignment event itself — they depend on the full composite key, not on
-    either column alone.
-
-    assigned_by stores the UUID of the user (or member) who performed the
-    assignment, providing a lightweight audit trail without a full audit log.
-    """
-
-    __tablename__ = "collaborator_role"
-
-    # Composite PK — (member_id, role_id) is unique per the 2NF analysis.
-    member_id = Column(
-        UUID(as_uuid=False),
-        ForeignKey("collaborator.member_id", ondelete="CASCADE"),
-        primary_key=True,
-        comment="Part of composite PK. FK to collaborator.",
-    )
-    role_id = Column(
-        UUID(as_uuid=False),
-        ForeignKey("role.role_id", ondelete="CASCADE"),
-        primary_key=True,
-        comment="Part of composite PK. FK to role.",
-    )
-
-    assigned_at = Column(
-        TIMESTAMP(timezone=True),
-        nullable=False,
-        server_default=_NOW_DEFAULT,
-        comment="UTC timestamp when this role was assigned to the collaborator.",
-    )
-
-    # Stores the user_id of the admin who performed the assignment.
-    # Not a formal FK to avoid circular dependencies; treated as audit data.
-    assigned_by = Column(
-        UUID(as_uuid=False),
-        nullable=True,
-        comment="UUID of the user who performed this role assignment (audit trail).",
-    )
-
-    # --- Relationships ---
-    collaborator = relationship("Collaborator", back_populates="role_assignments")
-    role = relationship("Role", back_populates="assignments")
+    # One Role → many Collaborators (single-role model).
+    collaborators = relationship("Collaborator", back_populates="role")
 
 
 # ===========================================================================
@@ -666,19 +622,48 @@ class CollaboratorRole(Base):
 # ===========================================================================
 
 
+class CampaignSenderPool(Base):
+    """
+    Campaign-level sender pool membership.
+
+    One row links one campaign to one sender account. The composite PK prevents
+    duplicate membership rows. Sender selection happens at runtime from this
+    pool instead of being fixed per StepEmail variant.
+    """
+
+    __tablename__ = "campaign_sender_pool"
+
+    campaign_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("campaign.campaign_id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="FK to campaign. Part of composite PK.",
+    )
+    sender_account_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("sender_account.account_id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="FK to sender_account. Part of composite PK.",
+    )
+
+    campaign = relationship("Campaign", back_populates="sender_pool_assignments")
+    sender_account = relationship(
+        "SenderAccount",
+        back_populates="campaign_pool_assignments",
+    )
+
+
 class Campaign(Base):
     """
     The core entity of CampaignPulse — an email outreach campaign.
 
     A campaign belongs to a workspace and is created by a collaborator (a
-    workspace member).  It defines the high-level sending strategy: which
-    timezone to honour, when to send (schedule), and its current lifecycle
-    state (status).
+    workspace member).  It defines the high-level sending strategy: timezone,
+    lifecycle status, and optional date bounds. Per-step send time and send
+    days live on SequenceStep rows, not on the campaign.
 
-    The schedule column stores a JSONB object that describes the sending
-    window, e.g. {"days": ["Mon","Tue","Wed"], "start": "09:00", "end": "17:00"}.
-    Using JSONB avoids the complexity of a separate schedule table while still
-    allowing JSON-path queries.
+    The schedule JSONB column is legacy and unused by the public API; new data
+    should rely on step-level send_time / send_days only.
 
     One campaign contains many SequenceSteps (the email templates) and many
     Leads (the recipients).
@@ -735,12 +720,11 @@ class Campaign(Base):
         comment="IANA timezone string governing when this campaign sends emails.",
     )
 
-    # Flexible JSONB schedule descriptor.
-    # e.g. {"days":["Mon","Tue","Wed","Thu","Fri"],"start":"09:00","end":"17:00"}
+    # Legacy JSONB; not exposed on the API. Sending windows are per-step.
     schedule = Column(
         JSONB,
         nullable=True,
-        comment="JSONB object describing the permitted sending window for this campaign.",
+        comment="Legacy campaign schedule JSONB (unused by API; use sequence_step.send_days).",
     )
 
     created_at = Column(
@@ -772,6 +756,23 @@ class Campaign(Base):
         comment="UTC timestamp of the most recent update to this campaign record.",
     )
 
+    __table_args__ = (
+        # Prevent duplicate campaign names in the same workspace.
+        UniqueConstraint("workspace_id", "campaign_name", name="uq_campaign_workspace_name"),
+        # Optional stronger form: case-insensitive uniqueness per workspace.
+        Index(
+            "uq_campaign_workspace_name_lower",
+            "workspace_id",
+            text("lower(campaign_name)"),
+            unique=True,
+        ),
+        CheckConstraint("timezone <> ''", name="ck_campaign_timezone_not_blank"),
+        CheckConstraint(
+            "status IN ('draft','scheduled','active','paused','completed','archived','deleted')",
+            name="ck_campaign_status",
+        ),
+    )
+
     # --- Relationships ---
     workspace = relationship("Workspace", back_populates="campaigns")
     creator = relationship(
@@ -801,6 +802,21 @@ class Campaign(Base):
         back_populates="campaign",
         cascade="all, delete-orphan",
         order_by="CampaignRun.created_at",
+    )
+
+    # One Campaign → many sender-pool membership rows.
+    sender_pool_assignments = relationship(
+        "CampaignSenderPool",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+    )
+
+    # Convenience many-to-many access to pooled sender accounts.
+    sender_accounts = relationship(
+        "SenderAccount",
+        secondary="campaign_sender_pool",
+        viewonly=True,
+        order_by="SenderAccount.created_at",
     )
 
 
@@ -859,22 +875,19 @@ class SequenceStep(Base):
         comment="Days to wait after the previous step before sending this email.",
     )
 
-    # Step-level send-time override.  When set, this step fires at this local
-    # time (in the parent Campaign's timezone) rather than the campaign-level
-    # schedule window.  Format: 'HH:MM' (24-hour, e.g. '09:00').
+    # Local send time in the parent campaign's timezone. Format: 'HH:MM' (24-hour).
     send_time = Column(
         String(5),
         nullable=True,
-        comment="Step-level send time override (HH:MM, 24-hour). Overrides campaign.schedule.",
+        comment="Step send time (HH:MM, 24-hour) in campaign timezone.",
     )
 
-    # Step-level day-of-week override.  JSON array of weekday strings,
-    # e.g. ["Monday", "Wednesday", "Friday"].  When set, this step only fires
-    # on the listed days, overriding the campaign-level schedule.
+    # JSON array of weekday strings, e.g. ["Monday", "Wednesday", "Friday"].
+    # API requires at least one day when creating or updating a step.
     send_days = Column(
         JSONB,
         nullable=True,
-        comment="Step-level send-day override — JSON array e.g. [\"Monday\",\"Wednesday\"].",
+        comment='Step send days — JSON array e.g. ["Monday","Wednesday"].',
     )
 
     # Enforce the original natural key as a unique constraint.
@@ -984,6 +997,33 @@ class Lead(Base):
         comment="Outreach funnel status: active | replied | unsubscribed | bounced | completed.",
     )
 
+    # Absolute UTC timestamp when this lead should be considered for the next send.
+    # Precomputing this avoids re-calculating schedule math in each scheduler loop.
+    next_scheduled_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when the next step email should fire for this lead.",
+    )
+
+    # Lightweight delivery lock state for atomic worker processing.
+    delivery_state = Column(
+        String(20),
+        nullable=False,
+        default="queued",
+        server_default=text("'queued'"),
+        comment="Worker state: queued | sending | sent | failed | paused.",
+    )
+    locked_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when a worker claimed this lead for sending.",
+    )
+    lock_token = Column(
+        UUID(as_uuid=False),
+        nullable=True,
+        comment="Worker claim token used to prevent duplicate sends across workers.",
+    )
+
     # Back-reference to the import batch that created this lead.
     # NULL for leads added manually (not via CSV/XLSX upload).
     import_session_id = Column(
@@ -1001,6 +1041,24 @@ class Lead(Base):
             "campaign_id",
             "email",
             name="uq_lead_campaign_email",
+        ),
+        CheckConstraint(
+            "lead_status IN ('active','replied','unsubscribed','bounced','completed')",
+            name="ck_lead_status",
+        ),
+        CheckConstraint(
+            "delivery_state IN ('queued','sending','sent','failed','paused')",
+            name="ck_lead_delivery_state",
+        ),
+        Index(
+            "ix_lead_next_scheduled_state",
+            "next_scheduled_at",
+            "delivery_state",
+        ),
+        Index(
+            "ix_lead_campaign_next_scheduled",
+            "campaign_id",
+            "next_scheduled_at",
         ),
     )
 
@@ -1281,6 +1339,20 @@ class SenderAccount(Base):
         cascade="all, delete-orphan",
     )
 
+    # One SenderAccount → many campaign-pool membership rows.
+    campaign_pool_assignments = relationship(
+        "CampaignSenderPool",
+        back_populates="sender_account",
+        cascade="all, delete-orphan",
+    )
+
+    campaigns = relationship(
+        "Campaign",
+        secondary="campaign_sender_pool",
+        viewonly=True,
+        order_by="Campaign.created_at",
+    )
+
 
 class WarmupSettings(Base):
     """
@@ -1449,6 +1521,21 @@ class Invitation(Base):
         TIMESTAMP(timezone=True),
         nullable=True,
         comment="UTC timestamp when the invitee accepted or declined.",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','accepted','declined','cancelled','expired')",
+            name="ck_invitation_status",
+        ),
+        # Enforce "one pending invite per workspace/email" at DB level.
+        Index(
+            "uq_invitation_pending_workspace_email",
+            "workspace_id",
+            "invitee_email",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
     )
 
     # --- Relationships ---
@@ -1679,10 +1766,9 @@ class StepEmail(Base):
     cycles through the variants, rotating across sender accounts, to distribute
     outreach volume across mailboxes and domains.
 
-    sender_account_id controls which mailbox is used:
-      • NULL   — the sending engine picks the next available account from the
-                 workspace's rotation pool (round-robin, respecting daily limits).
-      • non-NULL — this variant is always sent from the pinned SenderAccount.
+    Sender selection is decoupled from this table. The sending engine chooses
+    from the campaign's sender pool (campaign_sender_pool), allowing dynamic
+    rotation without hard-pinning a variant to one mailbox.
 
     A step with zero StepEmail rows cannot be started — the campaign-start
     validation gate checks this and returns 422 with a clear message.
@@ -1727,13 +1813,12 @@ class StepEmail(Base):
         comment="Display name for the From header. NULL = use sender_account default.",
     )
 
-    # NULL  = rotation pool (engine selects the next available account).
-    # set   = always use this specific mailbox for this variant.
-    sender_account_id = Column(
-        UUID(as_uuid=False),
-        ForeignKey("sender_account.account_id", ondelete="SET NULL"),
+    # SHA-256(subject_line + normalized body) for duplicate-content detection.
+    # Used by backend checks to prevent repeated spam-like content.
+    content_hash = Column(
+        String(64),
         nullable=True,
-        comment="FK to sender_account — NULL = rotation pool, set = pinned mailbox.",
+        comment="SHA-256 hash of normalized subject+body for duplicate-content checks.",
     )
 
     created_at = Column(
@@ -1745,7 +1830,16 @@ class StepEmail(Base):
 
     # --- Relationships ---
     step = relationship("SequenceStep", back_populates="email_variants")
-    sender_account = relationship("SenderAccount", foreign_keys=[sender_account_id])
+
+    __table_args__ = (
+        UniqueConstraint(
+            "step_id",
+            "content_hash",
+            name="uq_step_email_step_content_hash",
+        ),
+        Index("ix_step_email_content_hash", "content_hash"),
+        Index("ix_step_email_step_content_hash", "step_id", "content_hash"),
+    )
 
 
 # ===========================================================================
@@ -1832,6 +1926,17 @@ class CampaignRun(Base):
         nullable=False,
         server_default=_NOW_DEFAULT,
         comment="UTC timestamp when this run record was created.",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('started','paused','resumed','stopped','completed')",
+            name="ck_campaign_run_action",
+        ),
+        CheckConstraint(
+            "run_status IN ('running','paused','stopped','completed','error')",
+            name="ck_campaign_run_status",
+        ),
     )
 
     # --- Relationships ---

@@ -13,6 +13,8 @@ from tests.factories import (
     make_workspace,
 )
 
+SEND_DAYS_WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
 
 @pytest.fixture
 def owner(db):
@@ -44,7 +46,13 @@ def analyst(db, ws):
 def test_create_step(client, db, owner, ws, campaign):
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
-        json={"step_number": 1, "wait_days": 0, "email_variants": []},
+        json={
+            "step_number": 1,
+            "wait_days": 0,
+            "send_time": "09:00",
+            "send_days": SEND_DAYS_WEEKDAYS,
+            "email_variants": [],
+        },
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 201
@@ -57,6 +65,8 @@ def test_create_step_with_variant_inline(client, db, owner, ws, campaign):
         json={
             "step_number": 1,
             "wait_days": 2,
+            "send_time": "09:00",
+            "send_days": SEND_DAYS_WEEKDAYS,
             "email_variants": [{"subject_line": "Hi there", "email_body": "Body text"}],
         },
         cookies=auth_cookies(owner),
@@ -71,7 +81,12 @@ def test_duplicate_step_number_rejected(client, db, owner, ws, campaign):
     make_step(db, campaign.campaign_id, step_number=1)
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
-        json={"step_number": 1, "wait_days": 0},
+        json={
+            "step_number": 1,
+            "wait_days": 0,
+            "send_time": "09:00",
+            "send_days": SEND_DAYS_WEEKDAYS,
+        },
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 409
@@ -80,7 +95,12 @@ def test_duplicate_step_number_rejected(client, db, owner, ws, campaign):
 def test_analyst_cannot_create_step(client, db, analyst, ws, campaign):
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
-        json={"step_number": 1, "wait_days": 0},
+        json={
+            "step_number": 1,
+            "wait_days": 0,
+            "send_time": "09:00",
+            "send_days": SEND_DAYS_WEEKDAYS,
+        },
         cookies=auth_cookies(analyst),
     )
     assert res.status_code == 403
@@ -117,7 +137,12 @@ def test_delete_step_cascades_variants(client, db, owner, ws, campaign):
 def test_send_time_format_validated(client, db, owner, ws, campaign):
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
-        json={"step_number": 1, "wait_days": 0, "send_time": "9:00"},  # invalid — not HH:MM
+        json={
+            "step_number": 1,
+            "wait_days": 0,
+            "send_time": "9:00",
+            "send_days": SEND_DAYS_WEEKDAYS,
+        },  # invalid — not HH:MM
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 422
@@ -126,11 +151,71 @@ def test_send_time_format_validated(client, db, owner, ws, campaign):
 def test_valid_send_time(client, db, owner, ws, campaign):
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
-        json={"step_number": 1, "wait_days": 0, "send_time": "09:00"},
+        json={
+            "step_number": 1,
+            "wait_days": 0,
+            "send_time": "09:00",
+            "send_days": SEND_DAYS_WEEKDAYS,
+        },
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 201
     assert res.json()["send_time"] == "09:00"
+
+
+def test_wait_days_required_on_create(client, db, owner, ws, campaign):
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
+        json={"step_number": 1, "send_time": "09:00"},
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
+
+
+def test_send_time_required_on_create(client, db, owner, ws, campaign):
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
+        json={"step_number": 1, "wait_days": 0},
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
+
+
+def test_send_days_required_on_create(client, db, owner, ws, campaign):
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
+        json={"step_number": 1, "wait_days": 0, "send_time": "09:00"},
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
+
+
+def test_send_days_empty_list_rejected(client, db, owner, ws, campaign):
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
+        json={
+            "step_number": 1,
+            "wait_days": 0,
+            "send_time": "09:00",
+            "send_days": [],
+        },
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
+
+
+def test_send_days_invalid_weekday_rejected(client, db, owner, ws, campaign):
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
+        json={
+            "step_number": 1,
+            "wait_days": 0,
+            "send_time": "09:00",
+            "send_days": ["Mon"],
+        },
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -198,3 +283,22 @@ def test_multiple_variants_rotation_setup(client, db, owner, ws, campaign):
     )
     assert res.status_code == 200
     assert len(res.json()) == 3
+
+
+def test_duplicate_variant_content_rejected(client, db, owner, ws, campaign):
+    step = make_step(db, campaign.campaign_id)
+    payload = {"subject_line": "Duplicate Subject", "email_body": "Duplicate Body"}
+
+    first = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps/{step.step_id}/emails",
+        json=payload,
+        cookies=auth_cookies(owner),
+    )
+    assert first.status_code == 201
+
+    duplicate = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps/{step.step_id}/emails",
+        json=payload,
+        cookies=auth_cookies(owner),
+    )
+    assert duplicate.status_code == 409

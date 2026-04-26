@@ -31,8 +31,8 @@ class CollaboratorOut(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
 
-    # Roles currently assigned to this collaborator
-    roles: list[RoleOut] = []
+    # Single role assigned to this collaborator membership.
+    role: Optional[RoleOut] = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 

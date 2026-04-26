@@ -17,15 +17,18 @@
  *   workspaceId {string}
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  Check,
+  ChevronDown,
   Download,
   Loader2,
   Pause,
   Play,
   Square,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -33,6 +36,13 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import PermissionGate from "@/components/ui/PermissionGate";
 import SequenceBuilder from "@/components/dashboard/SequenceBuilder";
+import { messageFromApiErrorBody, userMessageFromFetchError } from "@/utils/apiError";
+import {
+  buildTimezoneOption,
+  filterTimezoneOptions,
+  getCampaignTimezoneOptions,
+} from "@/utils/campaignTimezones";
+import { isTextInputElement } from "@/utils/keyboard";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -82,7 +92,7 @@ function ExecutionControls({ campaign, workspaceId, onTransitioned }) {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Failed to ${action} campaign.`);
+        throw new Error(messageFromApiErrorBody(err, `Failed to ${action} campaign.`));
       }
       toast.success(`Campaign ${action}.`);
       onTransitioned?.();
@@ -120,7 +130,7 @@ function ExecutionControls({ campaign, workspaceId, onTransitioned }) {
 // Lead Upload
 // ---------------------------------------------------------------------------
 
-function LeadUploadButton({ workspaceId, campaignId, onUploaded }) {
+function LeadUploadButton({ workspaceId, campaignId, onUploaded, disabled, disabledReason }) {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
 
@@ -137,7 +147,7 @@ function LeadUploadButton({ workspaceId, campaignId, onUploaded }) {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Upload failed.");
+        throw new Error(messageFromApiErrorBody(err, "Upload failed."));
       }
       const session = await res.json();
       toast.success(
@@ -164,9 +174,10 @@ function LeadUploadButton({ workspaceId, campaignId, onUploaded }) {
         />
         <button
           type="button"
-          disabled={uploading}
+          disabled={uploading || disabled}
           onClick={() => inputRef.current?.click()}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+          title={disabled ? disabledReason : ""}
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
           Import CSV/XLSX
@@ -234,7 +245,7 @@ const leadStatusBadge = {
   opted_out: "bg-amber-100 text-amber-700",
 };
 
-function LeadsTab({ workspaceId, campaignId }) {
+function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -255,12 +266,20 @@ function LeadsTab({ workspaceId, campaignId }) {
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
+  const isLeadMutationLocked = ["completed", "deleted"].includes(campaignStatus);
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-700">
         <p className="text-sm text-slate-500">{leads.length} lead{leads.length !== 1 ? "s" : ""}</p>
         <div className="flex items-center gap-2">
-          <LeadUploadButton workspaceId={workspaceId} campaignId={campaignId} onUploaded={fetchLeads} />
+          <LeadUploadButton
+            workspaceId={workspaceId}
+            campaignId={campaignId}
+            onUploaded={fetchLeads}
+            disabled={isLeadMutationLocked}
+            disabledReason="Completed/deleted campaigns are view-only for lead changes."
+          />
           <ExportButton workspaceId={workspaceId} campaignId={campaignId} />
         </div>
       </div>
@@ -296,9 +315,7 @@ function LeadsTab({ workspaceId, campaignId }) {
                       {lead.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-400">
-                    {new Date(lead.created_at).toLocaleDateString()}
-                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-400">—</td>
                 </tr>
               ))}
             </tbody>
@@ -335,7 +352,7 @@ function RunsTab({ workspaceId, campaignId }) {
   }, [workspaceId, campaignId]);
 
   const runStatusBadge = {
-    active:    "bg-blue-100 text-blue-700",
+    running:   "bg-blue-100 text-blue-700",
     paused:    "bg-amber-100 text-amber-700",
     completed: "bg-emerald-100 text-emerald-700",
     error:     "bg-rose-200 text-rose-700",
@@ -374,6 +391,295 @@ function RunsTab({ workspaceId, campaignId }) {
 }
 
 // ---------------------------------------------------------------------------
+// Campaign time zone
+// ---------------------------------------------------------------------------
+
+function CampaignTimezoneSettings({ workspaceId, campaignId, campaign, readOnly, onSaved }) {
+  const [value, setValue] = useState(campaign.timezone || "UTC");
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlightIndex, setHighlightIndex] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const rootRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const optionRefs = useRef({});
+  const highlightIndexRef = useRef(0);
+
+  const allOptions = useMemo(() => getCampaignTimezoneOptions(), []);
+
+  const selectedOption = useMemo(() => {
+    const v = (value || "").trim();
+    const found = allOptions.find((o) => o.value === v);
+    if (found) return found;
+    try {
+      return buildTimezoneOption(v || "UTC");
+    } catch {
+      return { value: v || "UTC", label: v || "UTC" };
+    }
+  }, [allOptions, value]);
+
+  const listOptions = useMemo(() => {
+    let filtered = filterTimezoneOptions(allOptions, query);
+    if (filtered.length === 0) filtered = allOptions;
+    const v = (value || "").trim();
+    if (v && !filtered.some((o) => o.value === v)) {
+      try {
+        return [buildTimezoneOption(v), ...filtered];
+      } catch {
+        return [{ value: v, label: v }, ...filtered];
+      }
+    }
+    return filtered;
+  }, [allOptions, query, value]);
+
+  useEffect(() => {
+    setValue(campaign.timezone || "UTC");
+  }, [campaign.campaign_id, campaign.timezone]);
+
+  useEffect(() => {
+    highlightIndexRef.current = highlightIndex;
+  }, [highlightIndex]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (query.trim() !== "") {
+      setHighlightIndex(0);
+      return;
+    }
+    const idx = listOptions.findIndex((o) => o.value === value);
+    setHighlightIndex(idx >= 0 ? idx : 0);
+  }, [open, query, listOptions, value]);
+
+  useEffect(() => {
+    if (!open) return;
+    setHighlightIndex((i) =>
+      listOptions.length === 0 ? 0 : Math.max(0, Math.min(i, listOptions.length - 1))
+    );
+  }, [listOptions.length, open]);
+
+  useEffect(() => {
+    if (!open || listOptions.length === 0) return;
+    const el = optionRefs.current[highlightIndex];
+    el?.scrollIntoView({ block: "nearest" });
+  }, [highlightIndex, open, listOptions.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocMouseDown(e) {
+      if (rootRef.current && !rootRef.current.contains(e.target)) {
+        setOpen(false);
+        setQuery("");
+      }
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || readOnly) return;
+
+    function onKey(e) {
+      const root = rootRef.current;
+      if (!root?.contains(document.activeElement)) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        setQuery("");
+        return;
+      }
+
+      const max = Math.max(0, listOptions.length - 1);
+      if (listOptions.length === 0) return;
+
+      const active = document.activeElement;
+      const inSearch = searchInputRef.current && active === searchInputRef.current;
+
+      if (e.key === "ArrowDown") {
+        if (inSearch && isTextInputElement(active)) {
+          const pos = active.selectionStart ?? 0;
+          const len = active.value?.length ?? 0;
+          if (pos < len) return;
+        }
+        e.preventDefault();
+        setHighlightIndex((i) => Math.min(i + 1, max));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        if (inSearch && isTextInputElement(active)) {
+          const pos = active.selectionStart ?? 0;
+          if (pos > 0) return;
+        }
+        e.preventDefault();
+        setHighlightIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Home" && !inSearch) {
+        e.preventDefault();
+        setHighlightIndex(0);
+        return;
+      }
+      if (e.key === "End" && !inSearch) {
+        e.preventDefault();
+        setHighlightIndex(max);
+        return;
+      }
+      if (e.key === "Enter") {
+        const o = listOptions[highlightIndexRef.current];
+        if (o) {
+          e.preventDefault();
+          setValue(o.value);
+          setOpen(false);
+          setQuery("");
+        }
+      }
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, readOnly, listOptions]);
+
+  async function save() {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      toast.error("Select a time zone.");
+      return;
+    }
+    if (trimmed === (campaign.timezone || "UTC")) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `${API}/workspaces/${workspaceId}/campaigns/${campaignId}`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timezone: trimmed }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(messageFromApiErrorBody(body, "Could not update time zone."));
+      }
+      toast.success("Time zone saved.");
+      onSaved?.();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 border-b border-slate-200 bg-white px-6 py-5 dark:border-slate-700 dark:bg-slate-900 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+      <div ref={rootRef} className="min-w-0 flex-1 sm:max-w-xl">
+        <label className="mb-2 block text-sm font-medium text-slate-800 dark:text-slate-100">
+          Time zone
+        </label>
+        <div className="relative">
+          <button
+            type="button"
+            id={`campaign-tz-trigger-${campaignId}`}
+            disabled={readOnly}
+            onClick={() => !readOnly && setOpen((o) => !o)}
+            onKeyDown={(e) => {
+              if (readOnly) return;
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setOpen(true);
+              }
+            }}
+            className="flex h-12 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-4 text-left text-base font-normal text-slate-900 shadow-sm outline-none transition hover:border-slate-300 focus-visible:ring-2 focus-visible:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-500 dark:disabled:bg-slate-800/80"
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            aria-controls={open ? `campaign-tz-list-${campaignId}` : undefined}
+          >
+            <span className="min-w-0 truncate">{selectedOption.label}</span>
+            <ChevronDown
+              className={["h-4 w-4 shrink-0 text-slate-400 transition-transform", open ? "rotate-180" : ""].join(" ")}
+              aria-hidden
+            />
+          </button>
+
+          {open && !readOnly ? (
+            <div
+              id={`campaign-tz-list-${campaignId}`}
+              className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg ring-1 ring-black/5 dark:border-slate-600 dark:bg-slate-900 dark:ring-white/10"
+            >
+              <div className="border-b border-slate-100 p-2 dark:border-slate-700">
+                <input
+                  ref={searchInputRef}
+                  autoFocus
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search by city or region…"
+                  autoComplete="off"
+                  className="h-9 w-full rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:bg-white dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:bg-slate-900"
+                />
+              </div>
+              <ul role="listbox" aria-labelledby={`campaign-tz-trigger-${campaignId}`} className="max-h-60 overflow-y-auto py-1">
+                {listOptions.map((o, i) => (
+                  <li key={o.value} role="none">
+                    <button
+                      type="button"
+                      role="option"
+                      ref={(el) => {
+                        optionRefs.current[i] = el;
+                      }}
+                      aria-selected={o.value === value}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setValue(o.value);
+                        setOpen(false);
+                        setQuery("");
+                      }}
+                      onMouseEnter={() => setHighlightIndex(i)}
+                      className={[
+                        "flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm outline-none",
+                        i === highlightIndex
+                          ? "bg-slate-100 ring-1 ring-inset ring-blue-400/50 dark:bg-slate-800"
+                          : "",
+                        o.value === value
+                          ? "bg-blue-50 font-medium text-blue-900 dark:bg-blue-950/50 dark:text-blue-100"
+                          : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800",
+                      ].join(" ")}
+                    >
+                      {o.value === value ? (
+                        <Check className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" strokeWidth={2.5} />
+                      ) : (
+                        <span className="h-4 w-4 shrink-0" aria-hidden />
+                      )}
+                      <span className="min-w-0 truncate">{o.label}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <PermissionGate action="edit_campaign">
+        <button
+          type="button"
+          disabled={readOnly || saving || !value.trim()}
+          onClick={save}
+          className="h-12 shrink-0 rounded-lg bg-slate-900 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </PermissionGate>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -383,6 +689,7 @@ export default function CampaignDetailView({ campaignId }) {
   const [campaign, setCampaign] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("sequence");
+  const [deleting, setDeleting] = useState(false);
 
   const workspaceId = workspace?.workspace_id;
 
@@ -402,6 +709,33 @@ export default function CampaignDetailView({ campaignId }) {
   }, [workspaceId, campaignId]);
 
   useEffect(() => { fetchCampaign(); }, [fetchCampaign]);
+
+  async function handleDeleteCampaign() {
+    if (
+      !window.confirm(
+        `Delete “${campaign.name}”? It will be removed from this workspace.`
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await fetch(
+        `${API}/workspaces/${workspaceId}/campaigns/${campaignId}`,
+        { method: "DELETE", credentials: "include" }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(messageFromApiErrorBody(err, "Failed to delete campaign."));
+      }
+      toast.success(`Campaign “${campaign.name}” deleted.`);
+      router.push("/dashboard/campaigns");
+    } catch (err) {
+      toast.error(userMessageFromFetchError(err, "Failed to delete campaign."));
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   if (loading || !campaign) {
     return (
@@ -424,7 +758,12 @@ export default function CampaignDetailView({ campaignId }) {
         </button>
         <div className="flex-1">
           <h1 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{campaign.name}</h1>
-          <p className="text-xs text-slate-400">{campaign.lead_count} leads · {campaign.step_count} steps</p>
+          <p className="text-xs text-slate-400">
+            {campaign.lead_count} leads · {campaign.step_count} steps
+            {campaign.timezone ? (
+              <span className="text-slate-500"> · {campaign.timezone}</span>
+            ) : null}
+          </p>
         </div>
         <span className={["rounded-full px-3 py-1 text-xs font-semibold capitalize", statusBadge[campaign.status] || "bg-slate-200 text-slate-700"].join(" ")}>
           {campaign.status}
@@ -434,7 +773,33 @@ export default function CampaignDetailView({ campaignId }) {
           workspaceId={workspaceId}
           onTransitioned={fetchCampaign}
         />
+        {campaign.status !== "deleted" ? (
+          <PermissionGate action="delete_campaign">
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={handleDeleteCampaign}
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50 disabled:opacity-60 dark:border-rose-900/60 dark:bg-slate-900 dark:text-rose-400 dark:hover:bg-rose-950/40"
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete
+            </button>
+          </PermissionGate>
+        ) : null}
       </div>
+      {["completed", "deleted"].includes(campaign.status) && (
+        <div className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs font-medium text-amber-700">
+          This campaign is view-only. Lead and sequence mutations are disabled.
+        </div>
+      )}
+
+      <CampaignTimezoneSettings
+        workspaceId={workspaceId}
+        campaignId={campaignId}
+        campaign={campaign}
+        readOnly={["completed", "deleted"].includes(campaign.status)}
+        onSaved={fetchCampaign}
+      />
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200 bg-white px-6 dark:border-slate-700 dark:bg-slate-900">
@@ -458,10 +823,10 @@ export default function CampaignDetailView({ campaignId }) {
       {/* Tab content */}
       <div className="flex flex-1 overflow-hidden">
         {tab === "sequence" && workspaceId && (
-          <SequenceBuilder workspaceId={workspaceId} campaignId={campaignId} />
+          <SequenceBuilder workspaceId={workspaceId} campaignId={campaignId} campaignStatus={campaign.status} />
         )}
         {tab === "leads" && workspaceId && (
-          <LeadsTab workspaceId={workspaceId} campaignId={campaignId} />
+          <LeadsTab workspaceId={workspaceId} campaignId={campaignId} campaignStatus={campaign.status} />
         )}
         {tab === "runs" && workspaceId && (
           <RunsTab workspaceId={workspaceId} campaignId={campaignId} />

@@ -4,7 +4,7 @@ tests/factories.py — Helper functions for creating test data.
 Key ORM naming conventions mirrored here:
   Workspace.workspace_name   (not .name)
   Collaborator.member_id     (not .collaborator_id)
-  CollaboratorRole.member_id (not .collaborator_id)
+  Collaborator.role_id       (single-role model)
   Role.role_name             (not .name)
   Campaign.campaign_name     (not .name)
 """
@@ -16,12 +16,13 @@ from datetime import datetime, timedelta, timezone
 from app.auth import create_access_token, hash_password
 from app.models import (
     Campaign,
+    CampaignSenderPool,
     Collaborator,
-    CollaboratorRole,
     Invitation,
     Lead,
     LocalAuth,
     Role,
+    SenderAccount,
     SequenceStep,
     StepEmail,
     User,
@@ -76,15 +77,10 @@ def make_workspace(db, owner_user):
         member_id=str(uuid.uuid4()),
         workspace_id=ws.workspace_id,
         user_id=owner_user.user_id,
+        role_id=owner_role.role_id,
         invite_status="accepted",
     )
     db.add(collab)
-    db.flush()
-
-    db.add(CollaboratorRole(
-        member_id=collab.member_id,
-        role_id=owner_role.role_id,
-    ))
     db.commit()
     return ws
 
@@ -104,20 +100,12 @@ def add_member(db, workspace_id, user, role_name):
             member_id=str(uuid.uuid4()),
             workspace_id=workspace_id,
             user_id=user.user_id,
+            role_id=role.role_id,
             invite_status="accepted",
         )
         db.add(collab)
-        db.flush()
-
-    # Remove any existing role assignment before adding new one
-    db.query(CollaboratorRole).filter(
-        CollaboratorRole.member_id == collab.member_id
-    ).delete()
-
-    db.add(CollaboratorRole(
-        member_id=collab.member_id,
-        role_id=role.role_id,
-    ))
+    else:
+        collab.role_id = role.role_id
     db.commit()
     return collab
 
@@ -139,6 +127,31 @@ def make_campaign(db, workspace_id, creator_id=None, name="Test Campaign", statu
     db.add(campaign)
     db.commit()
     return campaign
+
+
+def make_sender_account(db, workspace_id, email=None, provider_type="smtp"):
+    email = email or f"sender_{uuid.uuid4().hex[:8]}@example.com"
+    account = SenderAccount(
+        account_id=str(uuid.uuid4()),
+        workspace_id=workspace_id,
+        provider_type=provider_type,
+        email=email,
+        status="active",
+        is_verified=True,
+    )
+    db.add(account)
+    db.commit()
+    return account
+
+
+def attach_sender_to_campaign(db, campaign_id, sender_account_id):
+    row = CampaignSenderPool(
+        campaign_id=campaign_id,
+        sender_account_id=sender_account_id,
+    )
+    db.add(row)
+    db.commit()
+    return row
 
 
 def make_step(db, campaign_id, step_number=1, wait_days=0):

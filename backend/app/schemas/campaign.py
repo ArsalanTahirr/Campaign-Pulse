@@ -18,6 +18,12 @@ from pydantic import BaseModel, Field
 class CampaignCreate(BaseModel):
     # Stored as `campaign_name` in the ORM; clients send/receive as `name`.
     name: str = Field(min_length=1, max_length=255)
+    timezone: str = Field(
+        default="UTC",
+        min_length=1,
+        max_length=100,
+        description='IANA timezone for scheduling (e.g. "UTC", "Asia/Karachi").',
+    )
     schedule: Optional[dict[str, Any]] = Field(
         None,
         description=(
@@ -31,11 +37,16 @@ class CampaignCreate(BaseModel):
 
 class CampaignUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    timezone: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=100,
+        description='IANA timezone for scheduling (e.g. "UTC", "America/New_York").',
+    )
     status: Optional[str] = Field(
         None,
         description="Allowed transitions are enforced server-side.",
     )
-    schedule: Optional[dict[str, Any]] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
@@ -47,7 +58,7 @@ class CampaignOut(BaseModel):
     # ORM column is `campaign_name`; expose as `name`.
     name: str = Field(validation_alias="campaign_name")
     status: str
-    schedule: Optional[dict[str, Any]] = None
+    timezone: str = "UTC"
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     created_at: datetime

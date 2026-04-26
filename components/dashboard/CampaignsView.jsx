@@ -8,9 +8,9 @@ import {
   CheckCircle2,
   ChevronDown,
   Loader2,
-  MoreHorizontal,
   Pause,
   Play,
+  Trash2,
   Search,
   X,
   Zap,
@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import PermissionGate from "@/components/ui/PermissionGate";
+import { messageFromApiErrorBody, userMessageFromFetchError } from "@/utils/apiError";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -73,7 +74,7 @@ function CreateCampaignModal({ workspaceId, onCreated, onClose }) {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Failed to create campaign.");
+        throw new Error(messageFromApiErrorBody(err, "Failed to create campaign."));
       }
       const created = await res.json();
       toast.success(`Campaign "${created.name}" created!`);
@@ -156,6 +157,7 @@ export default function CampaignsView() {
   const [selectedSort, setSelectedSort] = useState(sortOptions[0]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const statusRef = useRef(null);
   const sortRef = useRef(null);
 
@@ -207,7 +209,7 @@ export default function CampaignsView() {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Failed to ${action} campaign.`);
+        throw new Error(messageFromApiErrorBody(err, `Failed to ${action} campaign.`));
       }
       toast.success(`Campaign ${action === "paused" ? "paused" : "started"}.`);
       await fetchCampaigns();
@@ -215,6 +217,33 @@ export default function CampaignsView() {
       toast.error(err.message);
     } finally {
       setActionLoading(null);
+    }
+  }
+
+  async function handleDeleteCampaign(campaign) {
+    if (
+      !window.confirm(
+        `Delete “${campaign.name}”? It will be removed from this workspace.`
+      )
+    ) {
+      return;
+    }
+    setDeletingId(campaign.campaign_id);
+    try {
+      const res = await fetch(
+        `${API}/workspaces/${workspace.workspace_id}/campaigns/${campaign.campaign_id}`,
+        { method: "DELETE", credentials: "include" }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(messageFromApiErrorBody(err, "Failed to delete campaign."));
+      }
+      setCampaigns((prev) => prev.filter((c) => c.campaign_id !== campaign.campaign_id));
+      toast.success(`Campaign “${campaign.name}” deleted.`);
+    } catch (err) {
+      toast.error(userMessageFromFetchError(err, "Failed to delete campaign."));
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -385,8 +414,16 @@ export default function CampaignsView() {
             filteredCampaigns.map((campaign) => (
               <div
                 key={campaign.campaign_id}
+                role="button"
+                tabIndex={0}
                 onClick={() => router.push(`/dashboard/campaigns/${campaign.campaign_id}`)}
-                className="mb-3 grid cursor-pointer grid-cols-[minmax(200px,1.5fr)_130px_90px_90px_100px] items-center rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700 shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    router.push(`/dashboard/campaigns/${campaign.campaign_id}`);
+                  }
+                }}
+                className="mb-3 grid cursor-pointer grid-cols-[minmax(200px,1.5fr)_130px_90px_90px_100px] items-center rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700 shadow-sm transition-all hover:border-blue-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
               >
                 <div className="font-semibold text-slate-800">{campaign.name}</div>
 
@@ -425,13 +462,22 @@ export default function CampaignsView() {
                       )}
                     </button>
                   </PermissionGate>
-                  <button
-                    type="button"
-                    className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-                    aria-label="More options"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
+                  <PermissionGate action="delete_campaign">
+                    <button
+                      type="button"
+                      disabled={deletingId === campaign.campaign_id}
+                      onClick={() => handleDeleteCampaign(campaign)}
+                      className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
+                      aria-label="Delete campaign"
+                      title="Delete campaign"
+                    >
+                      {deletingId === campaign.campaign_id ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-rose-500" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  </PermissionGate>
                 </div>
               </div>
             ))
