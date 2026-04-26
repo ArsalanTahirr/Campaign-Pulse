@@ -191,6 +191,15 @@ def get_invitation_by_token(token: str, db: Session) -> Invitation:
 def accept_invitation(token: str, accepting_user_id: str, db: Session) -> Workspace:
     inv = get_invitation_by_token(token, db)
 
+    accepting_user = db.query(User).filter(User.user_id == accepting_user_id).first()
+    if not accepting_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    if accepting_user.email.strip().lower() != inv.invitee_email.strip().lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sign in with the email address this invitation was sent to.",
+        )
+
     existing = (
         db.query(Collaborator)
         .filter(

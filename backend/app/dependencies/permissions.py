@@ -27,7 +27,6 @@ PERMISSION_MATRIX: dict[str, set[str]] = {
     "stop_campaign":          {"Owner", "Agency", "Marketing Manager"},
     "manage_sequence":        {"Owner", "Agency", "Marketing Manager"},
     "import_leads":           {"Owner", "Agency", "Marketing Manager"},
-    "export_leads":           {"Owner", "Agency", "Marketing Manager", "Data Analyst"},
     "view_leads":             {"Owner", "Agency", "Marketing Manager", "Data Analyst"},
     "view_analytics":         {"Owner", "Agency", "Marketing Manager", "Data Analyst"},
     "invite_collaborator":    {"Owner", "Agency"},

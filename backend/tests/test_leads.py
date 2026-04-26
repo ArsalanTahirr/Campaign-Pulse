@@ -1,9 +1,8 @@
 """
-tests/test_leads.py — Lead CRUD, CSV import edge cases, and export tests.
+tests/test_leads.py — Lead CRUD and CSV/XLSX import edge cases.
 
-CSV import/export behaviour is defined in app.services.lead_service and
-app.services.export_service; tests here lock in the contract (headers, counts,
-errors, permissions, and round-trips).
+Import behaviour is defined in app.services.lead_service; tests here lock in
+the contract (headers, counts, errors, and permissions).
 """
 
 import io
@@ -160,15 +159,6 @@ def _make_csv_with_bom(rows: list[dict]) -> bytes:
     return b"\xef\xbb\xbf" + _make_csv(rows)
 
 
-def _parse_export_csv(text: str) -> tuple[list[str], list[dict]]:
-    """Parse streamed export body: header row + dict rows."""
-    lines = [ln for ln in text.strip().split("\n") if ln.strip()]
-    if not lines:
-        return [], []
-    reader = csv.DictReader(io.StringIO("\n".join(lines)))
-    return reader.fieldnames or [], list(reader)
-
-
 def test_import_csv_success(client, db, owner, ws, campaign):
     csv_data = _make_csv([
         {"email": "a@example.com", "first_name": "Alice", "last_name": "Smith"},
@@ -237,34 +227,6 @@ def test_analyst_cannot_import(client, db, analyst, ws, campaign):
         cookies=auth_cookies(analyst),
     )
     assert res.status_code == 403
-
-
-# ---------------------------------------------------------------------------
-# CSV export
-# ---------------------------------------------------------------------------
-
-
-def test_export_csv_streams(client, db, owner, ws, campaign):
-    for i in range(3):
-        make_lead(db, campaign.campaign_id, email=f"export{i}@example.com")
-
-    res = client.get(
-        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/leads/export",
-        cookies=auth_cookies(owner),
-    )
-    assert res.status_code == 200
-    assert "text/csv" in res.headers["content-type"]
-    lines = res.text.strip().split("\n")
-    assert len(lines) == 4  # 1 header + 3 leads
-
-
-def test_analyst_can_export(client, db, analyst, ws, campaign):
-    make_lead(db, campaign.campaign_id)
-    res = client.get(
-        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/leads/export",
-        cookies=auth_cookies(analyst),
-    )
-    assert res.status_code == 200
 
 
 def test_import_custom_variables_preserved(client, db, owner, ws, campaign):
@@ -499,92 +461,18 @@ def test_import_sets_import_session_id_on_leads(client, db, owner, ws, campaign)
     assert lead.import_session_id == session_id
 
 
-# ---------------------------------------------------------------------------
-# CSV export — additional cases
-# ---------------------------------------------------------------------------
-
-
-def test_export_csv_empty_campaign_header_only(client, db, owner, ws, campaign):
-    res = client.get(
-        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/leads/export",
-        cookies=auth_cookies(owner),
-    )
-    assert res.status_code == 200
-    fieldnames, rows = _parse_export_csv(res.text)
-    assert fieldnames == [
-        "lead_id",
-        "email",
-        "first_name",
-        "last_name",
-        "status",
-        "import_session_id",
-        "custom_variables",
-    ]
-    assert rows == []
-
-
-def test_export_csv_columns_match_created_lead(client, db, owner, ws, campaign):
-    client.post(
-        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/leads",
-        json={
-            "email": "full@example.com",
-            "first_name": "Full",
-            "last_name": "Export",
-            "custom_variables": {"tier": "pro"},
-        },
-        cookies=auth_cookies(owner),
-    )
-    res = client.get(
-        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/leads/export",
-        cookies=auth_cookies(owner),
-    )
-    assert res.status_code == 200
-    _, rows = _parse_export_csv(res.text)
-    assert len(rows) == 1
-    r = rows[0]
-    assert r["email"] == "full@example.com"
-    assert r["first_name"] == "Full"
-    assert r["last_name"] == "Export"
-    assert r["status"] == "active"
-    assert "tier" in (r.get("custom_variables") or "") or r.get("custom_variables")
-
-
-def test_export_import_roundtrip_emails(client, db, owner, ws, campaign):
-    """Export after import should list the same addresses (one row per lead)."""
-    csv_data = _make_csv(
-        [
-            {"email": "r1@example.com", "first_name": "One"},
-            {"email": "r2@example.com", "first_name": "Two"},
-        ]
-    )
-    imp = client.post(
-        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/leads/import",
-        files={"file": ("leads.csv", csv_data, "text/csv")},
-        cookies=auth_cookies(owner),
-    )
-    assert imp.status_code == 201
-    exp = client.get(
-        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/leads/export",
-        cookies=auth_cookies(owner),
-    )
-    assert exp.status_code == 200
-    _, rows = _parse_export_csv(exp.text)
-    emails = sorted(r["email"] for r in rows)
-    assert emails == ["r1@example.com", "r2@example.com"]
-
-
-def test_export_csv_includes_leads_for_completed_campaign(client, db, owner, ws):
-    """Leads on a completed campaign are still readable and exportable."""
+def test_list_leads_on_completed_campaign(client, db, owner, ws):
+    """Leads remain listable after the campaign is completed (read-only for mutations)."""
     c = make_campaign(db, ws.workspace_id, status="completed")
     make_lead(db, c.campaign_id, email="arch@example.com")
     res = client.get(
-        f"/workspaces/{ws.workspace_id}/campaigns/{c.campaign_id}/leads/export",
+        f"/workspaces/{ws.workspace_id}/campaigns/{c.campaign_id}/leads?limit=50",
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 200
-    _, rows = _parse_export_csv(res.text)
-    assert len(rows) == 1
-    assert rows[0]["email"] == "arch@example.com"
+    data = res.json()
+    assert len(data) == 1
+    assert data[0]["email"] == "arch@example.com"
 
 
 # ---------------------------------------------------------------------------

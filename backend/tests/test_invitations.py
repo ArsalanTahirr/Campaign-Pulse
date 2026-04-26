@@ -190,6 +190,14 @@ def test_double_accept_fails(client, db, owner, ws, agency_role):
     assert res.status_code == 409
 
 
+def test_accept_rejects_when_logged_in_as_different_email(client, db, owner, ws, agency_role):
+    invitee = make_user(db, email="right@example.com")
+    other = make_user(db, email="wrong@example.com")
+    inv = make_invitation(db, ws.workspace_id, owner.user_id, invitee.email, agency_role)
+    res = client.post(f"/invitations/accept/{inv.token}", cookies=auth_cookies(other))
+    assert res.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # Cancelling invitations
 # ---------------------------------------------------------------------------

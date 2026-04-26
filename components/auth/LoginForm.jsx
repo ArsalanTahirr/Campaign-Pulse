@@ -132,7 +132,20 @@ export default function LoginForm({ inviteToken: inviteTokenProp = null }) {
       const safeFirstName = String(firstName).trim() || "there";
       window.sessionStorage.setItem("welcomeFirstName", safeFirstName);
       if (inviteToken) {
-        router.replace(`/invitations/accept/${encodeURIComponent(inviteToken)}`);
+        const acceptRes = await fetch(
+          `${API_BASE_URL}/invitations/accept/${encodeURIComponent(inviteToken)}`,
+          { method: "POST", credentials: "include" }
+        );
+        if (!acceptRes.ok) {
+          const err = await acceptRes.json().catch(() => ({}));
+          const detail = err.detail;
+          setLoginMessage(
+            typeof detail === "string" ? detail : "Could not accept invitation."
+          );
+          router.replace(`/invitations/accept/${encodeURIComponent(inviteToken)}`);
+          return;
+        }
+        router.replace("/dashboard");
       } else {
         router.replace("/dashboard/email-accounts");
       }
@@ -188,7 +201,12 @@ export default function LoginForm({ inviteToken: inviteTokenProp = null }) {
   }
 
   function handleGoogleLogin() {
-    window.location.assign(`${API_BASE_URL}${GOOGLE_LOGIN_ENDPOINT}`);
+    const params = new URLSearchParams();
+    if (inviteToken) params.set("invite_token", inviteToken);
+    const qs = params.toString();
+    window.location.assign(
+      `${API_BASE_URL}${GOOGLE_LOGIN_ENDPOINT}${qs ? `?${qs}` : ""}`
+    );
   }
 
   return (

@@ -5,7 +5,7 @@
  *
  * Tabs:
  *  • Sequence  — SequenceBuilder (steps + email variants)
- *  • Leads     — lead list, bulk import, CSV export
+ *  • Leads     — lead list, bulk import
  *  • Runs      — execution history
  *
  * Top bar:
@@ -23,7 +23,6 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
-  Download,
   Loader2,
   Pause,
   Play,
@@ -188,50 +187,6 @@ function LeadUploadButton({ workspaceId, campaignId, onUploaded, disabled, disab
 }
 
 // ---------------------------------------------------------------------------
-// Export Button
-// ---------------------------------------------------------------------------
-
-function ExportButton({ workspaceId, campaignId }) {
-  const [downloading, setDownloading] = useState(false);
-
-  async function handleExport() {
-    setDownloading(true);
-    try {
-      const res = await fetch(
-        `${API}/workspaces/${workspaceId}/campaigns/${campaignId}/leads/export`,
-        { credentials: "include" }
-      );
-      if (!res.ok) throw new Error("Export failed.");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `leads_${campaignId}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setDownloading(false);
-    }
-  }
-
-  return (
-    <PermissionGate action="export_leads">
-      <button
-        type="button"
-        disabled={downloading}
-        onClick={handleExport}
-        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
-      >
-        {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-        Export CSV
-      </button>
-    </PermissionGate>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Leads Tab
 // ---------------------------------------------------------------------------
 
@@ -280,7 +235,6 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
             disabled={isLeadMutationLocked}
             disabledReason="Completed/deleted campaigns are view-only for lead changes."
           />
-          <ExportButton workspaceId={workspaceId} campaignId={campaignId} />
         </div>
       </div>
 

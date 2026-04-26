@@ -1,22 +1,20 @@
 """
-routers/leads.py — Lead CRUD, bulk import, and CSV export endpoints.
+routers/leads.py — Lead CRUD and bulk import endpoints.
 
 Routes (mounted under /workspaces/{workspace_id}/campaigns/{campaign_id}):
     GET    /leads                    — paginated lead list
     POST   /leads                    — create single lead
-    GET    /leads/export             — stream CSV (MUST be before {lead_id} wildcard)
     POST   /leads/import             — bulk CSV/XLSX upload
     GET    /leads/import/{session_id}— import session status (MUST be before {lead_id})
     GET    /leads/{lead_id}          — get lead
     PATCH  /leads/{lead_id}          — update lead
     DELETE /leads/{lead_id}          — delete lead
 
-IMPORTANT: Static paths (/export, /import, /import/{id}) are declared BEFORE the
+IMPORTANT: Static paths (/import, /import/{id}) are declared BEFORE the
 {lead_id} wildcard so FastAPI's first-match routing resolves them correctly.
 """
 
 from fastapi import APIRouter, Depends, Query, UploadFile, File, status
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -24,7 +22,6 @@ from app.dependencies import get_current_user, require_permission
 from app.models import LeadImportSession, User
 from app.schemas.lead import LeadCreate, LeadImportSessionOut, LeadOut, LeadUpdate
 from app.services import lead_service
-from app.services.export_service import generate_leads_csv
 
 router = APIRouter()
 
@@ -68,22 +65,6 @@ def create_lead(
 # ---------------------------------------------------------------------------
 # Static sub-paths — MUST come before /leads/{lead_id} wildcard
 # ---------------------------------------------------------------------------
-
-
-@router.get("/leads/export")
-def export_leads_csv(
-    workspace_id: str,
-    campaign_id: str,
-    _: None = require_permission("export_leads"),
-    db: Session = Depends(get_db),
-):
-    """Stream all leads for campaign_id as a UTF-8 CSV file."""
-    filename = f"leads_{campaign_id}.csv"
-    return StreamingResponse(
-        generate_leads_csv(campaign_id, db),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
 
 
 @router.post(

@@ -34,6 +34,7 @@ export default function AcceptInvitationPage() {
         if (!validateRes.ok) {
           const err = await validateRes.json().catch(() => ({}));
           setValidationError(err.detail || "This invitation is no longer valid.");
+          setValidating(false);
           return;
         }
 
@@ -41,10 +42,12 @@ export default function AcceptInvitationPage() {
         const meRes = await fetch(`${API}/auth/me`, { credentials: "include" });
         if (meRes.status === 401) {
           router.replace(`/auth/login?invite_token=${encodeURIComponent(token)}`);
+          // Keep spinner until the login page replaces this view (avoids a flash of the error state).
           return;
         }
         if (!meRes.ok) {
           setValidationError("Could not verify your session. Please log in again.");
+          setValidating(false);
           return;
         }
 
@@ -56,13 +59,23 @@ export default function AcceptInvitationPage() {
         });
         if (!acceptRes.ok) {
           const err = await acceptRes.json().catch(() => ({}));
-          throw new Error(err.detail || "Failed to accept invitation.");
+          const detail = err.detail;
+          const msg =
+            typeof detail === "string"
+              ? detail
+              : "Failed to accept invitation.";
+          throw new Error(msg);
         }
         setStatusText("Invitation accepted. Redirecting...");
         router.replace("/dashboard");
-      } catch {
-        setValidationError("Could not process invitation right now. Please try again.");
-      } finally {
+        // Do not setValidating(false) on success — otherwise we briefly render the
+        // fallback error UI before Next.js finishes navigation.
+      } catch (e) {
+        setValidationError(
+          e instanceof Error
+            ? e.message
+            : "Could not process invitation right now. Please try again."
+        );
         setValidating(false);
       }
     }
