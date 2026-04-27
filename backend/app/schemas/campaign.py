@@ -51,6 +51,20 @@ class CampaignUpdate(BaseModel):
     end_date: Optional[datetime] = None
 
 
+class CampaignSenderAccountOut(BaseModel):
+    account_id: str
+    email: str
+
+
+class CampaignSenderPoolUpdate(BaseModel):
+    account_ids: list[str] = Field(default_factory=list)
+
+
+class CampaignSenderPoolOut(BaseModel):
+    connected: list[CampaignSenderAccountOut] = Field(default_factory=list)
+    available: list[CampaignSenderAccountOut] = Field(default_factory=list)
+
+
 class CampaignOut(BaseModel):
     campaign_id: str
     workspace_id: str
@@ -67,6 +81,7 @@ class CampaignOut(BaseModel):
     # Convenience counts injected by the service layer (not ORM attributes)
     step_count: int = 0
     lead_count: int = 0
+    sender_accounts: list[CampaignSenderAccountOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 

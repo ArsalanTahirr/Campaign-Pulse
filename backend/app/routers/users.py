@@ -458,7 +458,7 @@ def login(
 
     token_ttl = timedelta(seconds=REMEMBER_ME_EXPIRE_SECONDS) if payload.remember_me else None
     access_token = create_access_token(
-        {"sub": user.user_id, "email": user.email},
+        {"sub": user.user_id, "email": user.email, "remember_me": payload.remember_me},
         expires_delta=token_ttl,
     )
     # Safety net for legacy users created before default-workspace enforcement.
@@ -617,8 +617,24 @@ def link_local_account(token: str, db: Session = Depends(get_db)):
     "/me",
     summary="Return currently authenticated user profile",
 )
-def me(current_user: User = Depends(get_current_user)):
+def me(request: Request, response: Response, current_user: User = Depends(get_current_user)):
     # Query is strictly user_id-scoped via get_current_user().
+    remember_me = False
+    token = _extract_access_token(request)
+    if token:
+        try:
+            payload = decode_access_token(token)
+            remember_me = bool(payload.get("remember_me", False))
+        except JWTError:
+            remember_me = False
+
+    token_ttl = timedelta(seconds=REMEMBER_ME_EXPIRE_SECONDS) if remember_me else None
+    renewed_token = create_access_token(
+        {"sub": current_user.user_id, "email": current_user.email, "remember_me": remember_me},
+        expires_delta=token_ttl,
+    )
+    _set_auth_cookie(response, renewed_token, remember_me=remember_me)
+
     return {
         "user_id": current_user.user_id,
         "email": current_user.email,
@@ -884,7 +900,7 @@ def google_callback(
                     raise
                 user = db.query(User).filter(User.user_id == oauth_account.user_id).first()
 
-    access_token = create_access_token({"sub": user.user_id, "email": user.email})
+    access_token = create_access_token({"sub": user.user_id, "email": user.email, "remember_me": False})
     # Ensure OAuth users also always have a default owner workspace.
     ensure_default_owner_workspace(user_id=user.user_id, first_name=user.first_name, db=db)
 

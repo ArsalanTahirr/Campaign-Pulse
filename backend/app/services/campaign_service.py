@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Campaign, CampaignRun, CampaignSenderPool, Collaborator, Lead, SequenceStep, StepEmail
+from app.models import Campaign, CampaignRun, CampaignSenderPool, Collaborator, Lead, SenderAccount, SequenceStep, StepEmail
 from app.services.audit_log_service import write_audit_log
 
 VALID_TRANSITIONS: dict[str, dict] = {
@@ -94,6 +94,60 @@ def get_campaign_or_404(campaign_id: str, workspace_id: str, db: Session) -> Cam
     return campaign
 
 
+def get_campaign_sender_accounts(campaign_id: str, db: Session) -> list[dict]:
+    rows = (
+        db.query(SenderAccount.account_id, SenderAccount.email)
+        .join(CampaignSenderPool, CampaignSenderPool.sender_account_id == SenderAccount.account_id)
+        .filter(CampaignSenderPool.campaign_id == campaign_id)
+        .order_by(SenderAccount.email.asc())
+        .all()
+    )
+    return [{"account_id": account_id, "email": email} for account_id, email in rows]
+
+
+def get_campaign_sender_pool_view(campaign_id: str, workspace_id: str, db: Session) -> dict:
+    get_campaign_or_404(campaign_id, workspace_id, db)
+    connected = get_campaign_sender_accounts(campaign_id, db)
+    available_rows = (
+        db.query(SenderAccount.account_id, SenderAccount.email)
+        .filter(
+            SenderAccount.workspace_id == workspace_id,
+            SenderAccount.deleted_at.is_(None),
+        )
+        .order_by(SenderAccount.email.asc())
+        .all()
+    )
+    available = [{"account_id": account_id, "email": email} for account_id, email in available_rows]
+    return {"connected": connected, "available": available}
+
+
+def replace_campaign_sender_pool(campaign_id: str, workspace_id: str, account_ids: list[str], db: Session) -> list[dict]:
+    get_campaign_or_404(campaign_id, workspace_id, db)
+    normalized_ids = list(dict.fromkeys([a for a in account_ids if a]))
+    if normalized_ids:
+        valid_count = (
+            db.query(func.count(SenderAccount.account_id))
+            .filter(
+                SenderAccount.workspace_id == workspace_id,
+                SenderAccount.account_id.in_(normalized_ids),
+                SenderAccount.deleted_at.is_(None),
+            )
+            .scalar()
+            or 0
+        )
+        if valid_count != len(normalized_ids):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="One or more sender accounts are invalid for this workspace.",
+            )
+
+    db.query(CampaignSenderPool).filter(CampaignSenderPool.campaign_id == campaign_id).delete(synchronize_session=False)
+    for account_id in normalized_ids:
+        db.add(CampaignSenderPool(campaign_id=campaign_id, sender_account_id=account_id))
+    db.commit()
+    return get_campaign_sender_accounts(campaign_id, db)
+
+
 def list_campaigns(workspace_id: str, db: Session) -> list[dict]:
     campaigns = (
         db.query(Campaign)
@@ -123,6 +177,7 @@ def list_campaigns(workspace_id: str, db: Session) -> list[dict]:
             "updated_at": c.updated_at,
             "step_count": step_count,
             "lead_count": lead_count,
+            "sender_accounts": get_campaign_sender_accounts(c.campaign_id, db),
         })
     return result
 

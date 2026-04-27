@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Campaign, Lead, LeadImportSession
+from app.services import sending_engine_service
 
 
 ALLOWED_MIME_TYPES = {
@@ -87,6 +88,7 @@ def create_lead(
             custom_variables=custom_variables,
             lead_status="active",
         )
+        sending_engine_service.initialize_lead_schedule(lead, db)
         db.add(lead)
         db.commit()
         db.refresh(lead)
@@ -229,6 +231,7 @@ async def import_leads_from_file(
                 import_session_id=session.session_id,
                 lead_status="active",
             )
+            sending_engine_service.initialize_lead_schedule(lead, db)
             db.add(lead)
             db.flush()
             sp.commit()

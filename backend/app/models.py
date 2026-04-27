@@ -34,6 +34,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     Date,
+    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -1024,6 +1025,15 @@ class Lead(Base):
         comment="Worker claim token used to prevent duplicate sends across workers.",
     )
 
+    # Points to the next sequence step this lead should receive.
+    # NULL means the lead is no longer scheduled for additional steps.
+    next_step_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("sequence_step.step_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to sequence_step — the next step due for this lead.",
+    )
+
     # Back-reference to the import batch that created this lead.
     # NULL for leads added manually (not via CSV/XLSX upload).
     import_session_id = Column(
@@ -1060,6 +1070,10 @@ class Lead(Base):
             "campaign_id",
             "next_scheduled_at",
         ),
+        Index(
+            "ix_lead_next_step_id",
+            "next_step_id",
+        ),
     )
 
     # --- Relationships ---
@@ -1070,6 +1084,11 @@ class Lead(Base):
         "LeadImportSession",
         back_populates="leads",
         foreign_keys=[import_session_id],
+    )
+
+    next_step = relationship(
+        "SequenceStep",
+        foreign_keys=[next_step_id],
     )
 
     # One Lead → many EmailEvents (every send/open/click for this lead).
@@ -1117,8 +1136,8 @@ class EmailEvent(Base):
     lead_id = Column(
         UUID(as_uuid=False),
         ForeignKey("lead.lead_id", ondelete="CASCADE"),
-        nullable=False,
-        comment="FK to lead — which contact this event is about.",
+        nullable=True,
+        comment="FK to lead — set for lead-scope events, NULL for warmup-scope events.",
     )
 
     # References the specific email template step that caused the event.
@@ -1140,6 +1159,34 @@ class EmailEvent(Base):
         comment="Type of deliverability / engagement event (sent, opened, clicked, …).",
     )
 
+    # Distinguishes normal campaign events from internal warmup traffic.
+    event_scope = Column(
+        String(20),
+        nullable=False,
+        server_default=text("'lead'"),
+        comment="Event scope: lead | warmup.",
+    )
+
+    sender_account_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("sender_account.account_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to sender_account that originated this event.",
+    )
+
+    recipient_account_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("sender_account.account_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to recipient sender_account for warmup exchange events.",
+    )
+
+    warmup_thread_id = Column(
+        UUID(as_uuid=False),
+        nullable=True,
+        comment="Correlation identifier for warmup message exchanges.",
+    )
+
     occurred_at = Column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -1158,9 +1205,38 @@ class EmailEvent(Base):
         comment="JSONB payload with event-specific details (URLs, bounce codes, IPs, etc.).",
     )
 
+    __table_args__ = (
+        CheckConstraint(
+            "event_scope IN ('lead','warmup')",
+            name="ck_email_event_scope",
+        ),
+        CheckConstraint(
+            "("
+            "(event_scope = 'lead' AND lead_id IS NOT NULL)"
+            " OR "
+            "(event_scope = 'warmup' AND lead_id IS NULL AND sender_account_id IS NOT NULL)"
+            ")",
+            name="ck_email_event_scope_shape",
+        ),
+        Index("ix_email_event_scope_occurred_at", "event_scope", "occurred_at"),
+        Index("ix_email_event_lead_occurred_at", "lead_id", "occurred_at"),
+        Index("ix_email_event_sender_occurred_at", "sender_account_id", "occurred_at"),
+        Index("ix_email_event_warmup_thread", "warmup_thread_id"),
+    )
+
     # --- Relationships ---
     lead = relationship("Lead", back_populates="events")
     step = relationship("SequenceStep", back_populates="events")
+    sender_account = relationship(
+        "SenderAccount",
+        foreign_keys=[sender_account_id],
+        back_populates="outgoing_events",
+    )
+    recipient_account = relationship(
+        "SenderAccount",
+        foreign_keys=[recipient_account_id],
+        back_populates="incoming_events",
+    )
 
 
 # ===========================================================================
@@ -1207,9 +1283,9 @@ class SenderAccount(Base):
         comment="FK to workspace — which workspace owns this sender account.",
     )
 
-    # 'smtp', 'google', 'microsoft', etc.
+    # 'smtp', 'google', 'microsoft'
     provider_type = Column(
-        String(50),
+        Enum("smtp", "google", "microsoft", name="sender_provider_type"),
         nullable=False,
         comment="Email provider type: smtp | google | microsoft.",
     )
@@ -1254,13 +1330,13 @@ class SenderAccount(Base):
     )
 
     # Operational status of the account.
-    # Typical values: 'active', 'inactive', 'suspended', 'warming_up'
+    # Typical values: 'active', 'warming_up', 'suspended', 'disconnected'
     status = Column(
         String(30),
         nullable=False,
         default="active",
         server_default=text("'active'"),
-        comment="Account status: active | inactive | suspended | warming_up.",
+        comment="Account status: active | warming_up | suspended | disconnected.",
     )
 
     # --- Rate-limiting fields ---
@@ -1319,6 +1395,11 @@ class SenderAccount(Base):
         server_default=_NOW_DEFAULT,
         comment="UTC timestamp when this sender account was added.",
     )
+    deleted_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC soft-delete timestamp. Non-null means account is disconnected from active use.",
+    )
 
     is_verified = Column(
         Boolean,
@@ -1351,6 +1432,16 @@ class SenderAccount(Base):
         secondary="campaign_sender_pool",
         viewonly=True,
         order_by="Campaign.created_at",
+    )
+    outgoing_events = relationship(
+        "EmailEvent",
+        foreign_keys="EmailEvent.sender_account_id",
+        back_populates="sender_account",
+    )
+    incoming_events = relationship(
+        "EmailEvent",
+        foreign_keys="EmailEvent.recipient_account_id",
+        back_populates="recipient_account",
     )
 
 
@@ -1419,6 +1510,12 @@ class WarmupSettings(Base):
         default=1.5,
         server_default=text("1.5"),
         comment="Daily growth multiplier for warm-up volume (e.g. 1.5 = +50%/day).",
+    )
+
+    warmup_started_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp used as day-0 anchor for warm-up ramp calculations.",
     )
 
     # --- Relationship back to SenderAccount ---

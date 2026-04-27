@@ -70,6 +70,37 @@ export default function DashboardShell({ children }) {
   }, []);
 
   useEffect(() => {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    let refreshing = false;
+
+    async function refreshSessionSilently() {
+      if (refreshing) return;
+      if (document.visibilityState !== "visible") return;
+      refreshing = true;
+      try {
+        await fetch(`${API_BASE_URL}/auth/me`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+      } catch {
+        // Silent keepalive should never disrupt UI.
+      } finally {
+        refreshing = false;
+      }
+    }
+
+    const intervalId = window.setInterval(refreshSessionSilently, 5 * 60 * 1000);
+    window.addEventListener("focus", refreshSessionSilently);
+    document.addEventListener("visibilitychange", refreshSessionSilently);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshSessionSilently);
+      document.removeEventListener("visibilitychange", refreshSessionSilently);
+    };
+  }, []);
+
+  useEffect(() => {
     const currentParams = new URLSearchParams(window.location.search);
     const loginType = currentParams.get("login_type");
     const welcomeFromQuery = currentParams.get("welcome_name") || "";
@@ -155,9 +186,9 @@ export default function DashboardShell({ children }) {
   }, [pathname]);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-slate-50/60 transition-colors duration-300 dark:bg-slate-950">
+    <div className="flex h-screen min-h-0 w-full overflow-hidden bg-slate-50/60 transition-colors duration-300 dark:bg-slate-950">
       <Sidebar user={currentUser} onLogout={handleLogout} onSettings={handleSettings} />
-      <main className="flex flex-1 flex-col overflow-hidden transition-colors duration-300">
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden transition-colors duration-300">
         <header className="sticky top-0 z-50 flex h-20 items-center justify-between border-b border-slate-200 bg-white/95 px-6 backdrop-blur transition-colors duration-300 sm:px-8 dark:border-slate-800 dark:bg-slate-900/95">
           <h1
             className={[
@@ -269,7 +300,7 @@ export default function DashboardShell({ children }) {
             ) : null}
           </div>
         </header>
-        <div className="flex flex-1 overflow-y-auto transition-colors duration-300">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden transition-colors duration-300">{children}</div>
       </main>
     </div>
   );

@@ -47,6 +47,14 @@ from app.schemas.lead import (
     LeadOut,
     LeadImportSessionOut,
 )
+from app.schemas.email_accounts import (
+    SenderAccountCreate,
+    SenderAccountUpdate,
+    SenderAccountOut,
+    WarmupSettingsIn,
+    WarmupSettingsPatch,
+    WarmupSettingsOut,
+)
 
 __all__ = [
     # workspace
@@ -77,4 +85,11 @@ __all__ = [
     "LeadUpdate",
     "LeadOut",
     "LeadImportSessionOut",
+    # email accounts / warmup
+    "SenderAccountCreate",
+    "SenderAccountUpdate",
+    "SenderAccountOut",
+    "WarmupSettingsIn",
+    "WarmupSettingsPatch",
+    "WarmupSettingsOut",
 ]

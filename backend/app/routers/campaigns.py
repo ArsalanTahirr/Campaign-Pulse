@@ -13,6 +13,9 @@ from app.schemas.campaign import (
     CampaignOut,
     CampaignRunCreate,
     CampaignRunOut,
+    CampaignSenderAccountOut,
+    CampaignSenderPoolOut,
+    CampaignSenderPoolUpdate,
     CampaignUpdate,
 )
 from app.services import campaign_service
@@ -34,6 +37,25 @@ def _resolve_member_id(user_id: str, workspace_id: str, db: Session) -> str | No
         .first()
     )
     return collab.member_id if collab else None
+
+
+def _campaign_to_out(campaign, *, step_count: int = 0, lead_count: int = 0, sender_accounts=None) -> CampaignOut:
+    payload = {
+        "campaign_id": campaign.campaign_id,
+        "workspace_id": campaign.workspace_id,
+        "created_by": campaign.created_by,
+        "campaign_name": campaign.campaign_name,
+        "status": _normalize_campaign_status(campaign.status),
+        "timezone": campaign.timezone,
+        "start_date": campaign.start_date,
+        "end_date": campaign.end_date,
+        "created_at": campaign.created_at,
+        "updated_at": campaign.updated_at,
+        "step_count": step_count,
+        "lead_count": lead_count,
+        "sender_accounts": sender_accounts or [],
+    }
+    return CampaignOut.model_validate(payload)
 
 
 @router.get("", response_model=list[CampaignOut])
@@ -64,7 +86,10 @@ def create_campaign(
         end_date=body.end_date,
         db=db,
     )
-    return CampaignOut.model_validate(campaign)
+    return _campaign_to_out(
+        campaign,
+        sender_accounts=campaign_service.get_campaign_sender_accounts(campaign.campaign_id, db),
+    )
 
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
@@ -85,11 +110,12 @@ def get_campaign(
         Lead.campaign_id == campaign_id
     ).scalar() or 0
 
-    out = CampaignOut.model_validate(campaign)
-    out.status = _normalize_campaign_status(out.status)
-    out.step_count = step_count
-    out.lead_count = lead_count
-    return out
+    return _campaign_to_out(
+        campaign,
+        step_count=step_count,
+        lead_count=lead_count,
+        sender_accounts=campaign_service.get_campaign_sender_accounts(campaign_id, db),
+    )
 
 
 @router.patch("/{campaign_id}", response_model=CampaignOut)
@@ -102,9 +128,10 @@ def update_campaign(
 ):
     updates = body.model_dump(exclude_unset=True)
     campaign = campaign_service.update_campaign(campaign_id, workspace_id, updates, db)
-    out = CampaignOut.model_validate(campaign)
-    out.status = _normalize_campaign_status(out.status)
-    return out
+    return _campaign_to_out(
+        campaign,
+        sender_accounts=campaign_service.get_campaign_sender_accounts(campaign.campaign_id, db),
+    )
 
 
 @router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -143,3 +170,24 @@ def list_runs(
     db: Session = Depends(get_db),
 ):
     return campaign_service.get_campaign_runs(campaign_id, workspace_id, db)
+
+
+@router.get("/{campaign_id}/sender-pool", response_model=CampaignSenderPoolOut)
+def get_sender_pool(
+    workspace_id: str,
+    campaign_id: str,
+    _: None = require_permission("view_workspace"),
+    db: Session = Depends(get_db),
+):
+    return campaign_service.get_campaign_sender_pool_view(campaign_id, workspace_id, db)
+
+
+@router.put("/{campaign_id}/sender-pool", response_model=list[CampaignSenderAccountOut])
+def replace_sender_pool(
+    workspace_id: str,
+    campaign_id: str,
+    body: CampaignSenderPoolUpdate,
+    _: None = require_permission("edit_campaign"),
+    db: Session = Depends(get_db),
+):
+    return campaign_service.replace_campaign_sender_pool(campaign_id, workspace_id, body.account_ids, db)

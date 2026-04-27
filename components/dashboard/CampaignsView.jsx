@@ -359,12 +359,13 @@ export default function CampaignsView() {
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/40 p-3">
-        <div className="min-w-[900px]">
-          <div className="mb-2 grid grid-cols-[minmax(200px,1.5fr)_130px_90px_90px_100px] items-center px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        <div className="min-w-[980px]">
+          <div className="mb-2 grid grid-cols-[minmax(200px,1.5fr)_130px_90px_90px_170px_100px] items-center px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             <div>Name</div>
             <div>Status</div>
             <div>Steps</div>
             <div>Leads</div>
+            <div>Sender accounts</div>
             <div />
           </div>
 
@@ -423,7 +424,7 @@ export default function CampaignsView() {
                     router.push(`/dashboard/campaigns/${campaign.campaign_id}`);
                   }
                 }}
-                className="mb-3 grid cursor-pointer grid-cols-[minmax(200px,1.5fr)_130px_90px_90px_100px] items-center rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700 shadow-sm transition-all hover:border-blue-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                className="mb-3 grid cursor-pointer grid-cols-[minmax(200px,1.5fr)_130px_90px_90px_170px_100px] items-center rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700 shadow-sm transition-all hover:border-blue-200 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
               >
                 <div className="font-semibold text-slate-800">{campaign.name}</div>
 
@@ -440,6 +441,15 @@ export default function CampaignsView() {
 
                 <div className="text-slate-600">{campaign.step_count}</div>
                 <div className="text-slate-600">{campaign.lead_count}</div>
+                <div className="text-xs text-slate-600">
+                  {(campaign.sender_accounts || []).length > 0 ? (
+                    <span title={(campaign.sender_accounts || []).map((s) => s.email).join(", ")}>
+                      {(campaign.sender_accounts || []).length} connected
+                    </span>
+                  ) : (
+                    <span className="text-amber-600">Not connected</span>
+                  )}
+                </div>
 
                 <div className="ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                   <PermissionGate action={campaign.status === "active" ? "pause_campaign" : "start_campaign"}>

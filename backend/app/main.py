@@ -10,13 +10,25 @@ sub-module (database.py, auth.py, email_utils.py, routers/users.py).
 """
 
 import os
+import asyncio
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import users
-from app.routers import workspaces, invitations, collaborators, campaigns, sequences, leads
+from app.routers import (
+    workspaces,
+    invitations,
+    collaborators,
+    campaigns,
+    sequences,
+    leads,
+    email_accounts,
+    engine_ops,
+    track,
+)
+from app.workers.engine_loops import imap_reply_loop, sending_loop, warmup_loop
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -56,6 +68,8 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+_ENGINE_TASKS: list[asyncio.Task] = []
 
 # ---------------------------------------------------------------------------
 # Middleware
@@ -111,4 +125,37 @@ app.include_router(
     prefix="/workspaces/{workspace_id}/campaigns/{campaign_id}",
     tags=["Leads"],
 )
+
+# Email accounts — workspace scoped
+app.include_router(
+    email_accounts.router,
+    prefix="/workspaces/{workspace_id}",
+    tags=["Email Accounts"],
+)
+
+app.include_router(
+    engine_ops.router,
+    prefix="/workspaces/{workspace_id}/engine",
+    tags=["Engine Ops"],
+)
+
+# Public tracking links
+app.include_router(track.router, prefix="/track", tags=["Tracking"])
+
+
+@app.on_event("startup")
+async def startup_background_workers():
+    if os.environ.get("ENABLE_SENDING_ENGINE", "false").lower() != "true":
+        return
+    _ENGINE_TASKS.clear()
+    _ENGINE_TASKS.append(asyncio.create_task(sending_loop()))
+    _ENGINE_TASKS.append(asyncio.create_task(warmup_loop()))
+    _ENGINE_TASKS.append(asyncio.create_task(imap_reply_loop()))
+
+
+@app.on_event("shutdown")
+async def shutdown_background_workers():
+    for task in _ENGINE_TASKS:
+        task.cancel()
+    _ENGINE_TASKS.clear()
 

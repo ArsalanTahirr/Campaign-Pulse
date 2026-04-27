@@ -24,6 +24,7 @@ import {
   Check,
   ChevronDown,
   Loader2,
+  Mail,
   Pause,
   Play,
   Square,
@@ -644,6 +645,9 @@ export default function CampaignDetailView({ campaignId }) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("sequence");
   const [deleting, setDeleting] = useState(false);
+  const [senderPool, setSenderPool] = useState({ connected: [], available: [] });
+  const [selectedSenderIds, setSelectedSenderIds] = useState([]);
+  const [savingSenderPool, setSavingSenderPool] = useState(false);
 
   const workspaceId = workspace?.workspace_id;
 
@@ -663,6 +667,25 @@ export default function CampaignDetailView({ campaignId }) {
   }, [workspaceId, campaignId]);
 
   useEffect(() => { fetchCampaign(); }, [fetchCampaign]);
+
+  const fetchSenderPool = useCallback(async () => {
+    if (!workspaceId) return;
+    try {
+      const res = await fetch(`${API}/workspaces/${workspaceId}/campaigns/${campaignId}/sender-pool`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setSenderPool(data);
+      setSelectedSenderIds((data.connected || []).map((s) => s.account_id));
+    } catch {
+      // non-fatal
+    }
+  }, [workspaceId, campaignId]);
+
+  useEffect(() => {
+    fetchSenderPool();
+  }, [fetchSenderPool]);
 
   async function handleDeleteCampaign() {
     if (
@@ -688,6 +711,30 @@ export default function CampaignDetailView({ campaignId }) {
       toast.error(userMessageFromFetchError(err, "Failed to delete campaign."));
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function saveSenderPool() {
+    if (!workspaceId) return;
+    setSavingSenderPool(true);
+    try {
+      const res = await fetch(`${API}/workspaces/${workspaceId}/campaigns/${campaignId}/sender-pool`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_ids: selectedSenderIds }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(messageFromApiErrorBody(err, "Failed to update sender accounts."));
+      }
+      toast.success("Sender accounts updated.");
+      await fetchCampaign();
+      await fetchSenderPool();
+    } catch (err) {
+      toast.error(userMessageFromFetchError(err, "Failed to update sender accounts."));
+    } finally {
+      setSavingSenderPool(false);
     }
   }
 
@@ -754,6 +801,88 @@ export default function CampaignDetailView({ campaignId }) {
         readOnly={["completed", "deleted"].includes(campaign.status)}
         onSaved={fetchCampaign}
       />
+
+      <div className="border-b border-slate-200 bg-white px-6 py-4 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex items-start gap-3">
+          <div className="rounded-lg bg-slate-100 p-2 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            <Mail className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Sender accounts</h2>
+            {(campaign.sender_accounts || []).length === 0 ? (
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                No sender accounts are assigned yet. Add one from the campaign sender pool before starting.
+              </p>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {campaign.sender_accounts.map((sender) => (
+                  <span
+                    key={sender.account_id}
+                    className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    {sender.email}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="border-b border-slate-200 bg-white px-6 py-4 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Campaign sender pool</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Select which workspace accounts are connected to this campaign for sending rotation.
+            </p>
+          </div>
+          <PermissionGate action="edit_campaign">
+            <button
+              type="button"
+              onClick={saveSenderPool}
+              disabled={savingSenderPool}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900"
+            >
+              {savingSenderPool ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Save pool
+            </button>
+          </PermissionGate>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {(senderPool.available || []).map((sender) => {
+            const checked = selectedSenderIds.includes(sender.account_id);
+            return (
+              <label
+                key={sender.account_id}
+                className={[
+                  "flex items-center justify-between rounded-lg border px-3 py-2 text-sm",
+                  checked
+                    ? "border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100"
+                    : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
+                ].join(" ")}
+              >
+                <span className="truncate pr-2">{sender.email}</span>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedSenderIds((prev) => [...prev, sender.account_id]);
+                    } else {
+                      setSelectedSenderIds((prev) => prev.filter((id) => id !== sender.account_id));
+                    }
+                  }}
+                  className="h-4 w-4"
+                />
+              </label>
+            );
+          })}
+          {(senderPool.available || []).length === 0 ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400">No active sender accounts in workspace.</p>
+          ) : null}
+        </div>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200 bg-white px-6 dark:border-slate-700 dark:bg-slate-900">

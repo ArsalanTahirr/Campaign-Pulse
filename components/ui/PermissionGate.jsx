@@ -40,7 +40,7 @@ const PERMISSION_MATRIX = {
   invite_collaborator:   ["Owner", "Agency"],
   remove_collaborator:   ["Owner", "Agency"],
   change_role:           ["Owner", "Agency"],
-  manage_email_accounts: ["Owner", "Agency"],
+  manage_email_accounts: ["Owner", "Agency", "Marketing Manager"],
   view_workspace:        ["Owner", "Agency", "Marketing Manager", "Data Analyst"],
   edit_workspace:        ["Owner"],
 };
