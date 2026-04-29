@@ -1,6 +1,8 @@
 from urllib.parse import quote
+import uuid
 
 from app.models import EmailEvent
+from app.services import sending_engine_service
 from app.services.tracking_service import sign_click_target
 from tests.factories import (
     attach_sender_to_campaign,
@@ -8,6 +10,7 @@ from tests.factories import (
     make_lead,
     make_sender_account,
     make_step,
+    make_step_email,
     make_user,
     make_workspace,
 )
@@ -69,3 +72,47 @@ def test_click_tracking_rejects_bad_signature(client, db):
     target = "https://example.com/offer"
     bad = client.get(f"/track/click/{sent_event.event_id}?u={quote(target, safe='')}&sig=invalid")
     assert bad.status_code == 403
+
+
+def test_process_claimed_lead_renders_merge_tags_from_custom_variables(db, monkeypatch):
+    user = make_user(db)
+    ws = make_workspace(db, user)
+    campaign = make_campaign(db, ws.workspace_id, name="Merge Campaign", status="active")
+    step = make_step(db, campaign.campaign_id, step_number=1)
+    make_step_email(
+        db,
+        step.step_id,
+        subject="Hi {{first_name}} from {{company}}",
+        body="<p>{{first_name}} {{last_name}} - {{job_title}} - {{missing_key}}</p>",
+    )
+    sender = make_sender_account(db, ws.workspace_id, email="sender_merge@example.com")
+    attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
+
+    lead = make_lead(db, campaign.campaign_id, email="lead_merge@example.com")
+    lead.first_name = "Ava"
+    lead.last_name = "Stone"
+    lead.custom_variables = {"company": "Acme", "job_title": "Founder"}
+    lead.delivery_state = "sending"
+    lock_token = str(uuid.uuid4())
+    lead.lock_token = lock_token
+    lead.next_step_id = step.step_id
+    db.commit()
+
+    captured = {}
+
+    def _fake_send_smtp(account, recipient, subject, html_body, plain_body=""):
+        captured["recipient"] = recipient
+        captured["subject"] = subject
+        captured["html_body"] = html_body
+        return "<message-id>"
+
+    monkeypatch.setattr(sending_engine_service, "_send_smtp", _fake_send_smtp)
+
+    sending_engine_service.process_claimed_lead(lead.lead_id, lock_token, db)
+    db.refresh(lead)
+
+    assert captured["recipient"] == "lead_merge@example.com"
+    assert captured["subject"] == "Hi Ava from Acme"
+    assert "<p>Ava Stone - Founder - </p>" in captured["html_body"]
+    assert "{{" not in captured["html_body"]
+    assert lead.delivery_state == "sent"

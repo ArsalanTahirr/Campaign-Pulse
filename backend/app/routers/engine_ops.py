@@ -2,17 +2,21 @@
 routers/engine_ops.py — Operator endpoints for on-demand sending engine actions.
 """
 
-import os
-
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import require_permission
 from app.models import Campaign, Lead
 from app.services import sending_engine_service
+from app.workers.engine_loops import is_engine_enabled, set_engine_enabled
 
 router = APIRouter()
+
+
+class EngineToggleIn(BaseModel):
+    enabled: bool
 
 
 @router.get("/status")
@@ -41,10 +45,20 @@ def engine_status(
         .count()
     )
     return {
-        "engine_enabled": os.environ.get("ENABLE_SENDING_ENGINE", "false").lower() == "true",
+        "engine_enabled": is_engine_enabled(),
         "queued_leads": queued,
         "sending_leads": sending,
     }
+
+
+@router.patch("/enabled")
+def set_engine_runtime_enabled(
+    workspace_id: str,
+    body: EngineToggleIn,
+    _: None = require_permission("manage_email_accounts"),
+):
+    set_engine_enabled(body.enabled)
+    return {"engine_enabled": is_engine_enabled()}
 
 
 @router.post("/run-send-once")

@@ -566,6 +566,27 @@ export default function EmailAccountsView() {
     }
   }
 
+  async function toggleEngineEnabled(nextEnabled) {
+    if (!workspace?.workspace_id) return;
+    setOpLoading("toggle-engine");
+    try {
+      const res = await fetch(`${API}/workspaces/${workspace.workspace_id}/engine/enabled`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      if (!res.ok) throw new Error("Failed to toggle engine.");
+      setEngineStatus((prev) => (prev ? { ...prev, engine_enabled: nextEnabled } : prev));
+      toast.success(`Auto-send ${nextEnabled ? "enabled" : "disabled"}.`);
+      await fetchEngineStatus();
+    } catch (err) {
+      toast.error(userMessageFromFetchError(err, "Failed to update auto-send setting."));
+    } finally {
+      setOpLoading("");
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8">
       <header className="space-y-1">
@@ -601,6 +622,25 @@ export default function EmailAccountsView() {
                     {engineStatus.sending_leads} in progress
                   </span>
                 ) : null}
+                <PermissionGate action="manage_email_accounts">
+                  <button
+                    type="button"
+                    onClick={() => toggleEngineEnabled(!engineStatus.engine_enabled)}
+                    disabled={opLoading === "toggle-engine"}
+                    className={[
+                      "rounded-full px-2.5 py-1 font-medium transition-colors",
+                      engineStatus.engine_enabled
+                        ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                        : "bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200",
+                    ].join(" ")}
+                  >
+                    {opLoading === "toggle-engine"
+                      ? "Saving..."
+                      : engineStatus.engine_enabled
+                        ? "Disable auto-send"
+                        : "Enable auto-send"}
+                  </button>
+                </PermissionGate>
               </div>
             ) : null}
             <button

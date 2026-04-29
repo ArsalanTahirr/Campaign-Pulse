@@ -5,6 +5,7 @@ services/sending_engine_service.py — Core sending, warmup, and reply-detection
 import imaplib
 import math
 import os
+import re
 import smtplib
 import ssl
 import uuid
@@ -29,6 +30,7 @@ from app.models import (
 from app.services.tracking_service import sign_click_target
 
 TRACKING_BASE_URL = os.environ.get("TRACKING_BASE_URL", "http://localhost:8000")
+MERGE_TAG_PATTERN = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 
 
 def _effective_daily_limit(account: SenderAccount) -> int:
@@ -102,6 +104,34 @@ def _pick_step_variant(step_id: str, db: Session) -> StepEmail | None:
         .order_by(StepEmail.created_at.asc())
         .first()
     )
+
+
+def _build_merge_context(lead: Lead) -> dict[str, str]:
+    context: dict[str, str] = {
+        "email": str(lead.email or ""),
+        "first_name": str(lead.first_name or ""),
+        "last_name": str(lead.last_name or ""),
+    }
+
+    custom_variables = lead.custom_variables if isinstance(lead.custom_variables, dict) else {}
+    for key, value in custom_variables.items():
+        key_str = str(key).strip()
+        if not key_str:
+            continue
+        context[key_str] = "" if value is None else str(value)
+
+    return context
+
+
+def _render_merge_tags(template: str, context: dict[str, str]) -> str:
+    if not template:
+        return ""
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        return context.get(key, "")
+
+    return MERGE_TAG_PATTERN.sub(_replace, template)
 
 
 def _append_tracking_pixel(html_body: str, sent_event_id: str) -> str:
@@ -263,12 +293,15 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
         return
 
     sent_event_id = str(uuid.uuid4())
-    html_body = _append_tracking_pixel(variant.email_body, sent_event_id)
+    merge_context = _build_merge_context(lead)
+    rendered_subject = _render_merge_tags(variant.subject_line, merge_context)
+    rendered_html_body = _render_merge_tags(variant.email_body, merge_context)
+    html_body = _append_tracking_pixel(rendered_html_body, sent_event_id)
     try:
         message_id = _send_smtp(
             account=sender,
             recipient=lead.email,
-            subject=variant.subject_line,
+            subject=rendered_subject,
             html_body=html_body,
         )
     except Exception as exc:

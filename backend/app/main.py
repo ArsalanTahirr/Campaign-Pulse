@@ -145,8 +145,6 @@ app.include_router(track.router, prefix="/track", tags=["Tracking"])
 
 @app.on_event("startup")
 async def startup_background_workers():
-    if os.environ.get("ENABLE_SENDING_ENGINE", "false").lower() != "true":
-        return
     _ENGINE_TASKS.clear()
     _ENGINE_TASKS.append(asyncio.create_task(sending_loop()))
     _ENGINE_TASKS.append(asyncio.create_task(warmup_loop()))
