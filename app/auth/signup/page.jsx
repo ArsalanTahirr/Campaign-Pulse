@@ -129,14 +129,47 @@ export default function SignupPage() {
     setSubmitError("");
   }
 
+  function parseDateOnly(dateValue) {
+    // Handles date inputs like "YYYY-MM-DD" in a timezone-stable way.
+    if (typeof dateValue !== "string") return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const monthIndex = Number(match[2]) - 1; // JS months are 0-based
+    const day = Number(match[3]);
+
+    const date = new Date(year, monthIndex, day);
+    // Guard against invalid dates like 2026-02-31 (JS will roll over).
+    if (Number.isNaN(date.getTime())) return null;
+    if (date.getFullYear() !== year || date.getMonth() !== monthIndex || date.getDate() !== day) return null;
+    return date;
+  }
+
+  function isDobInFuture(dateOfBirth) {
+    const dobDate = parseDateOnly(dateOfBirth);
+    if (!dobDate) return false;
+
+    const now = new Date();
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return dobDate.getTime() > todayDate.getTime();
+  }
+
   function isAtLeast18(dateOfBirth) {
     if (!dateOfBirth) return false;
-    const dob = new Date(dateOfBirth);
-    if (Number.isNaN(dob.getTime())) return false;
+
+    // Explicitly reject future DOBs.
+    if (isDobInFuture(dateOfBirth)) return false;
+
+    const dob = parseDateOnly(dateOfBirth);
+    if (!dob) return false;
+
     const today = new Date();
-    let age = today.getFullYear() - dob.getFullYear();
-    const monthDelta = today.getMonth() - dob.getMonth();
-    if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < dob.getDate())) {
+    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    let age = todayDate.getFullYear() - dob.getFullYear();
+    const monthDelta = todayDate.getMonth() - dob.getMonth();
+    if (monthDelta < 0 || (monthDelta === 0 && todayDate.getDate() < dob.getDate())) {
       age -= 1;
     }
     return age >= 18;
@@ -160,6 +193,8 @@ export default function SignupPage() {
     if (step === 2) {
       if (!formData.dob) {
         nextErrors.dob = "Please provide your date of birth.";
+      } else if (isDobInFuture(formData.dob)) {
+        nextErrors.dob = "Date of birth cannot be in the future.";
       } else if (!isAtLeast18(formData.dob)) {
         nextErrors.dob = "You must be 18 or older to register.";
       }
@@ -207,6 +242,8 @@ export default function SignupPage() {
     if (field === "dob") {
       if (!value) {
         nextErrors.dob = "Please provide your date of birth.";
+      } else if (isDobInFuture(value)) {
+        nextErrors.dob = "Date of birth cannot be in the future.";
       } else if (!isAtLeast18(value)) {
         nextErrors.dob = "You must be 18 or older to register.";
       } else delete nextErrors.dob;
