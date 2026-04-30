@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Calendar, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 
 export default function DatePickerPopover({
   value,
@@ -12,12 +12,32 @@ export default function DatePickerPopover({
   placeholder = "Select your birth date",
   id = "date-picker"
 }) {
+  const parseDateOnly = (dateValue) => {
+    if (typeof dateValue !== "string") return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
+    if (!match) return null;
+    const y = Number(match[1]);
+    const m = Number(match[2]) - 1;
+    const d = Number(match[3]);
+    const parsed = new Date(y, m, d);
+    if (Number.isNaN(parsed.getTime())) return null;
+    if (parsed.getFullYear() !== y || parsed.getMonth() !== m || parsed.getDate() !== d) return null;
+    return parsed;
+  };
+
+  const toDateOnlyString = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
   const [isOpen, setIsOpen] = useState(false);
   const [month, setMonth] = useState(
-    value ? new Date(value).getMonth() : new Date().getMonth()
+    value ? (parseDateOnly(value)?.getMonth() ?? new Date().getMonth()) : new Date().getMonth()
   );
   const [year, setYear] = useState(
-    value ? new Date(value).getFullYear() : new Date().getFullYear()
+    value ? (parseDateOnly(value)?.getFullYear() ?? new Date().getFullYear()) : new Date().getFullYear()
   );
   const containerRef = useRef(null);
   const triggerRef = useRef(null);
@@ -25,16 +45,13 @@ export default function DatePickerPopover({
   // Format date for display
   const formatDate = (dateStr) => {
     if (!dateStr) return placeholder;
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric"
-      });
-    } catch {
-      return placeholder;
-    }
+    const date = parseDateOnly(dateStr);
+    if (!date) return placeholder;
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
   };
 
   // Get days in month
@@ -65,7 +82,7 @@ export default function DatePickerPopover({
   // Handle date selection
   const handleSelectDate = (day) => {
     const selected = new Date(year, month, day);
-    const dateString = selected.toISOString().split("T")[0];
+    const dateString = toDateOnlyString(selected);
     onChange(dateString);
     setIsOpen(false);
   };
@@ -73,7 +90,7 @@ export default function DatePickerPopover({
   // Handle Today
   const handleToday = () => {
     const today = new Date();
-    const dateString = today.toISOString().split("T")[0];
+    const dateString = toDateOnlyString(today);
     onChange(dateString);
     setIsOpen(false);
   };
@@ -138,13 +155,7 @@ export default function DatePickerPopover({
   }, [isOpen]);
 
   const calendarDays = generateCalendarDays();
-  const monthName = new Date(year, month, 1).toLocaleDateString("en-US", {
-    month: "long"
-  });
-  const selectedDate = value ? new Date(value) : null;
-  const isToday =
-    selectedDate &&
-    selectedDate.toDateString() === new Date().toDateString();
+  const selectedDate = value ? parseDateOnly(value) : null;
 
   // Generate year options (18-100 years ago from today)
   const today = new Date();
@@ -266,12 +277,10 @@ export default function DatePickerPopover({
                       );
                     }
 
-                    const isCurrentMonth = true;
                     const cellDate = new Date(year, month, day);
                     const isSelected =
                       selectedDate &&
                       cellDate.toDateString() === selectedDate.toDateString();
-                    const isBeforeToday = cellDate < new Date();
                     const isFuture = cellDate > new Date();
 
                     return (

@@ -113,6 +113,7 @@ export default function SignupPage() {
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   function sanitizeTextInput(value) {
     return value.replace(/[<>&"'`]/g, "");
@@ -285,6 +286,7 @@ export default function SignupPage() {
     if (!validateStep(3)) return;
 
     setSubmitError("");
+    setSuccessMessage("");
     setIsSubmitting(true);
 
     try {
@@ -324,6 +326,17 @@ export default function SignupPage() {
         }
         throw new Error(message);
       }
+
+      let message = "We've sent a verification link to your email. Please open your inbox and click the link to activate your account.";
+      try {
+        const data = await response.json();
+        if (typeof data?.detail === "string" && data.detail.trim()) {
+          message = data.detail;
+        }
+      } catch {
+        // Keep default success message.
+      }
+      setSuccessMessage(message);
     } catch (error) {
       setSubmitError(error?.message || "We couldn't complete signup right now. Please try again.");
     } finally {
@@ -463,27 +476,31 @@ export default function SignupPage() {
                       <label htmlFor="dob" className="mb-2 block text-sm font-medium text-slate-700">
                         Date of birth
                       </label>
-                      <DatePickerPopover
-                        id="dob"
-                        value={formData.dob}
-                        onChange={(v) => updateField("dob", v)}
-                        onBlur={() => validateSignupField("dob")}
-                        error={errors.dob}
-                        placeholder="Select your birth date"
-                      />
+                      <div className={errors.dob ? "animate-shake" : ""}>
+                        <DatePickerPopover
+                          id="dob"
+                          value={formData.dob}
+                          onChange={(v) => updateField("dob", v)}
+                          onBlur={() => validateSignupField("dob")}
+                          error={errors.dob}
+                          placeholder="Select your birth date"
+                        />
+                      </div>
                     </div>
 
                     <div>
                       <label htmlFor="gender" className="mb-2 block text-sm font-medium text-slate-700">
                         Gender
                       </label>
-                      <GenderSelect
-                        id="gender"
-                        value={formData.gender}
-                        onChange={(v) => updateField("gender", v)}
-                        onBlur={() => validateSignupField("gender")}
-                        error={errors.gender}
-                      />
+                      <div className={errors.gender ? "animate-shake" : ""}>
+                        <GenderSelect
+                          id="gender"
+                          value={formData.gender}
+                          onChange={(v) => updateField("gender", v)}
+                          onBlur={() => validateSignupField("gender")}
+                          error={errors.gender}
+                        />
+                      </div>
                     </div>
 
                     <button
@@ -602,13 +619,31 @@ export default function SignupPage() {
                       </div>
                     </div>
 
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700"
-                    >
-                      {isSubmitting ? "Creating account..." : "Join Now"}
-                    </button>
+                    {successMessage ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm"
+                      >
+                        <p className="text-sm font-semibold text-emerald-800">
+                          Verification email sent
+                        </p>
+                        <p className="mt-1 text-sm leading-relaxed text-emerald-700">
+                          {successMessage}
+                        </p>
+                        <p className="mt-2 text-xs text-emerald-700/90">
+                          If you don't see it, check your spam or promotions folder.
+                        </p>
+                      </motion.div>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {isSubmitting ? "Creating account..." : "Join Now"}
+                      </button>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
