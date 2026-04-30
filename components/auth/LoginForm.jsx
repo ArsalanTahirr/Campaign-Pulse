@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { X, Home, Inbox, Mail, Send, TrendingUp, Eye, EyeOff, AlertCircle } from "lucide-react";
 
-export default function LoginForm() {
+export default function LoginForm({ inviteToken: inviteTokenProp = null }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const inviteToken = inviteTokenProp || searchParams.get("invite_token");
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
   const LOGIN_ENDPOINT = process.env.NEXT_PUBLIC_LOGIN_ENDPOINT || "/auth/login";
   const GOOGLE_LOGIN_ENDPOINT = process.env.NEXT_PUBLIC_GOOGLE_LOGIN_ENDPOINT || "/auth/google/login";
@@ -129,7 +131,24 @@ export default function LoginForm() {
 
       const safeFirstName = String(firstName).trim() || "there";
       window.sessionStorage.setItem("welcomeFirstName", safeFirstName);
-      router.replace("/dashboard/email-accounts");
+      if (inviteToken) {
+        const acceptRes = await fetch(
+          `${API_BASE_URL}/invitations/accept/${encodeURIComponent(inviteToken)}`,
+          { method: "POST", credentials: "include" }
+        );
+        if (!acceptRes.ok) {
+          const err = await acceptRes.json().catch(() => ({}));
+          const detail = err.detail;
+          setLoginMessage(
+            typeof detail === "string" ? detail : "Could not accept invitation."
+          );
+          router.replace(`/invitations/accept/${encodeURIComponent(inviteToken)}`);
+          return;
+        }
+        router.replace("/dashboard");
+      } else {
+        router.replace("/dashboard/email-accounts");
+      }
     } catch {
       setLoginMessage("Something went wrong. Please try again.");
     } finally {
@@ -182,7 +201,12 @@ export default function LoginForm() {
   }
 
   function handleGoogleLogin() {
-    window.location.assign(`${API_BASE_URL}${GOOGLE_LOGIN_ENDPOINT}`);
+    const params = new URLSearchParams();
+    if (inviteToken) params.set("invite_token", inviteToken);
+    const qs = params.toString();
+    window.location.assign(
+      `${API_BASE_URL}${GOOGLE_LOGIN_ENDPOINT}${qs ? `?${qs}` : ""}`
+    );
   }
 
   return (

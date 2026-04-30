@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 
-export default function DashboardIndexPage({ searchParams }) {
+export default async function DashboardIndexPage({ searchParams }) {
+  const sp = await searchParams;
   const params = new URLSearchParams();
-  if (searchParams?.login_type) params.set("login_type", searchParams.login_type);
-  if (searchParams?.welcome_name) params.set("welcome_name", searchParams.welcome_name);
+  if (sp?.login_type) params.set("login_type", sp.login_type);
+  if (sp?.welcome_name) params.set("welcome_name", sp.welcome_name);
   const queryString = params.toString();
   redirect(`/dashboard/email-accounts${queryString ? `?${queryString}` : ""}`);
 }

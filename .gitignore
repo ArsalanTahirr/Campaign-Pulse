@@ -284,3 +284,5 @@ backend/**/*.py[cod]
 # The root-level .env (already ignored above) is the primary credentials file.
 backend/.env
 backend/.env.*
+
+Normalization_Report_3NF.md

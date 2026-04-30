@@ -5,8 +5,8 @@ All routes are mounted under the /auth prefix by main.py:
 
     POST  /auth/signup                — local email+password registration
     GET   /auth/verify-email?token=   — email verification via signed token
-    GET   /auth/google/login          — initiate Google OAuth 2.0 flow
-    GET   /auth/google/callback       — handle Google OAuth callback
+    GET   /auth/google/login          — initiate Google OAuth 2.0 flow (optional ?invite_token=)
+    GET   /auth/google/callback       — handle Google OAuth callback (reads state for invite)
 """
 
 import os
@@ -18,7 +18,7 @@ from urllib.parse import urlencode, urljoin
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -43,6 +43,8 @@ from app.email_utils import (
     send_verification_email,
 )
 from app.models import LocalAuth, OAuthAccount, User
+from app.services import invitation_service
+from app.services.workspace_service import ensure_default_owner_workspace
 from app.schemas import (
     LoginRequest,
     ResetPasswordConfirmRequest,
@@ -89,6 +91,17 @@ logger = logging.getLogger(__name__)
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+# OAuth2 state value carrying workspace invite token through Google redirect (namespaced).
+_GOOGLE_INVITE_STATE_PREFIX = "cp_invite_v1:"
+
+
+def _parse_google_oauth_invite_state(state: str | None) -> str | None:
+    if not state:
+        return None
+    if not state.startswith(_GOOGLE_INVITE_STATE_PREFIX):
+        return None
+    token = state[len(_GOOGLE_INVITE_STATE_PREFIX) :].strip()
+    return token or None
 
 
 def _build_frontend_redirect(path: str, params: dict | None = None, fragment: dict | None = None) -> str:
@@ -326,6 +339,11 @@ def signup(
             first_name=payload.first_name,
             base_url=BACKEND_BASE_URL,
         )
+        ensure_default_owner_workspace(
+            user_id=existing.user_id,
+            first_name=existing.first_name,
+            db=db,
+        )
 
         return SignupResponse(
             user_id=existing.user_id,
@@ -376,6 +394,9 @@ def signup(
         first_name=payload.first_name,
         base_url=BACKEND_BASE_URL,
     )
+
+    # Every user must own a default workspace.
+    ensure_default_owner_workspace(user_id=user.user_id, first_name=user.first_name, db=db)
 
     return SignupResponse(
         user_id=user_id,
@@ -437,9 +458,11 @@ def login(
 
     token_ttl = timedelta(seconds=REMEMBER_ME_EXPIRE_SECONDS) if payload.remember_me else None
     access_token = create_access_token(
-        {"sub": user.user_id, "email": user.email},
+        {"sub": user.user_id, "email": user.email, "remember_me": payload.remember_me},
         expires_delta=token_ttl,
     )
+    # Safety net for legacy users created before default-workspace enforcement.
+    ensure_default_owner_workspace(user_id=user.user_id, first_name=user.first_name, db=db)
     _set_auth_cookie(response, access_token, remember_me=payload.remember_me)
     return TokenResponse(
         access_token=access_token,
@@ -594,8 +617,24 @@ def link_local_account(token: str, db: Session = Depends(get_db)):
     "/me",
     summary="Return currently authenticated user profile",
 )
-def me(current_user: User = Depends(get_current_user)):
+def me(request: Request, response: Response, current_user: User = Depends(get_current_user)):
     # Query is strictly user_id-scoped via get_current_user().
+    remember_me = False
+    token = _extract_access_token(request)
+    if token:
+        try:
+            payload = decode_access_token(token)
+            remember_me = bool(payload.get("remember_me", False))
+        except JWTError:
+            remember_me = False
+
+    token_ttl = timedelta(seconds=REMEMBER_ME_EXPIRE_SECONDS) if remember_me else None
+    renewed_token = create_access_token(
+        {"sub": current_user.user_id, "email": current_user.email, "remember_me": remember_me},
+        expires_delta=token_ttl,
+    )
+    _set_auth_cookie(response, renewed_token, remember_me=remember_me)
+
     return {
         "user_id": current_user.user_id,
         "email": current_user.email,
@@ -677,10 +716,19 @@ def verify_email(token: str, db: Session = Depends(get_db)):
     "/google/login",
     summary="Redirect the browser to Google's OAuth 2.0 authorization page",
 )
-def google_login():
+def google_login(
+    invite_token: str | None = Query(
+        None,
+        max_length=512,
+        description="Optional workspace invitation token; echoed in OAuth state through Google.",
+    ),
+):
     """
     Build and return a 307 redirect to Google's authorization endpoint.
     The frontend opens this URL (or redirects to it) to start the OAuth flow.
+
+    When ``invite_token`` is provided, it is embedded in the OAuth ``state``
+    parameter so ``/auth/google/callback`` can accept the invite after sign-in.
     """
     params = {
         "client_id": GOOGLE_CLIENT_ID,
@@ -690,6 +738,9 @@ def google_login():
         "access_type": "offline",
         "prompt": "select_account",
     }
+    trimmed = (invite_token or "").strip()
+    if trimmed:
+        params["state"] = f"{_GOOGLE_INVITE_STATE_PREFIX}{trimmed}"
     return RedirectResponse(
         url=f"{_GOOGLE_AUTH_URL}?{urlencode(params)}",
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
@@ -705,7 +756,11 @@ def google_login():
     "/google/callback",
     summary="Handle Google OAuth callback and redirect to frontend",
 )
-def google_callback(code: str, db: Session = Depends(get_db)):
+def google_callback(
+    code: str,
+    state: str | None = None,
+    db: Session = Depends(get_db),
+):
     """
     OAuth callback flow:
       1. Exchange the authorization code for a Google access token.
@@ -845,8 +900,22 @@ def google_callback(code: str, db: Session = Depends(get_db)):
                     raise
                 user = db.query(User).filter(User.user_id == oauth_account.user_id).first()
 
-    access_token = create_access_token({"sub": user.user_id, "email": user.email})
-    redirect_url = _build_frontend_redirect(FRONTEND_DASHBOARD_PATH)
+    access_token = create_access_token({"sub": user.user_id, "email": user.email, "remember_me": False})
+    # Ensure OAuth users also always have a default owner workspace.
+    ensure_default_owner_workspace(user_id=user.user_id, first_name=user.first_name, db=db)
+
+    invite_token = _parse_google_oauth_invite_state(state)
+    if invite_token:
+        try:
+            invitation_service.accept_invitation(invite_token, user.user_id, db)
+        except HTTPException as exc:
+            logger.warning("Google OAuth: invitation accept failed: %s", exc.detail)
+            redirect_url = _build_frontend_redirect(f"/invitations/accept/{invite_token}")
+        else:
+            redirect_url = _build_frontend_redirect(FRONTEND_DASHBOARD_PATH)
+    else:
+        redirect_url = _build_frontend_redirect(FRONTEND_DASHBOARD_PATH)
+
     redirect_response = RedirectResponse(url=redirect_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
     _set_auth_cookie(redirect_response, access_token)
     return redirect_response

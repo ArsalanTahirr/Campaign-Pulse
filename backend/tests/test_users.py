@@ -23,8 +23,11 @@ Email verification
 
 Google OAuth
   ✓ /google/login redirects to accounts.google.com (307)
-  ✓ /google/callback — brand-new user created, redirects to frontend callback (307)
+  ✓ /google/login?invite_token=… embeds token in OAuth state for Google
+  ✓ /google/callback — brand-new user created, redirects to frontend (307)
   ✓ /google/callback — existing user re-uses OAuthAccount, no duplicates (307)
+  ✓ /google/callback + invite state — accepts workspace invitation when emails match
+  ✓ /google/callback + invite state — wrong Google email redirects to accept page
 
 External calls are fully mocked:
   - app.routers.users.send_verification_email → prevents real email delivery
@@ -34,6 +37,7 @@ External calls are fully mocked:
 
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import parse_qs, quote, urlparse
 
 import pytest
 from itsdangerous import SignatureExpired
@@ -76,6 +80,30 @@ def test_signup_success(client, mocker):
     assert "user_id" in data
     assert "@" in data["email"]
     assert "verify" in data["message"].lower() or "check" in data["message"].lower()
+
+
+def test_signup_creates_default_owner_workspace(client, db, mocker):
+    from app.models import Collaborator, Role, User
+
+    mocker.patch("app.routers.users.send_verification_email", return_value=None)
+    email = _unique_email()
+    resp = client.post("/auth/signup", json=_payload(email=email))
+    assert resp.status_code == 201
+
+    user = db.query(User).filter(User.email == email).first()
+    assert user is not None
+
+    owner_membership = (
+        db.query(Collaborator)
+        .join(Role, Role.role_id == Collaborator.role_id)
+        .filter(
+            Collaborator.user_id == user.user_id,
+            Collaborator.invite_status == "accepted",
+            Role.role_name == "Owner",
+        )
+        .first()
+    )
+    assert owner_membership is not None
 
 
 def test_signup_duplicate_email_unverified_resends_verification(client, mocker):
@@ -349,6 +377,20 @@ def test_google_login_redirect(client):
     assert "accounts.google.com" in resp.headers["location"]
 
 
+def test_google_login_includes_invite_token_in_oauth_state(client):
+    """Optional invite_token is passed through Google OAuth ``state``."""
+    resp = client.get(
+        "/auth/google/login?invite_token=my_invite_secret",
+        follow_redirects=False,
+    )
+    assert resp.status_code == 307
+    loc = resp.headers["location"]
+    assert "accounts.google.com" in loc
+    parsed = urlparse(loc)
+    qs = parse_qs(parsed.query)
+    assert qs.get("state", [None])[0] == "cp_invite_v1:my_invite_secret"
+
+
 def _mock_google_http(mocker, token_json: dict, userinfo_json: dict):
     """
     Patch `httpx.Client` as seen from the router module so that:
@@ -388,7 +430,7 @@ def test_google_callback_new_user(client, db, mocker):
     A brand-new Google identity should create a User + OAuthAccount row and
     return a valid TokenResponse.
     """
-    from app.models import OAuthAccount, User
+    from app.models import Collaborator, OAuthAccount, Role, User
 
     google_sub = f"google_sub_{uuid.uuid4().hex}"
     google_email = _unique_email()
@@ -424,6 +466,18 @@ def test_google_callback_new_user(client, db, mocker):
     user = db.query(User).filter(User.email == google_email).first()
     assert user is not None
     assert user.is_verified is True
+
+    owner_membership = (
+        db.query(Collaborator)
+        .join(Role, Role.role_id == Collaborator.role_id)
+        .filter(
+            Collaborator.user_id == user.user_id,
+            Collaborator.invite_status == "accepted",
+            Role.role_name == "Owner",
+        )
+        .first()
+    )
+    assert owner_membership is not None
 
 
 def test_google_callback_existing_user(client, db, mocker):
@@ -469,6 +523,86 @@ def test_google_callback_existing_user(client, db, mocker):
     assert len(oauth_rows) == 1, (
         "Calling /google/callback twice for the same sub must not create duplicate rows"
     )
+
+
+def test_google_callback_accepts_workspace_invite_via_oauth_state(client, db, mocker):
+    """OAuth ``state`` may carry a workspace invite token; accept runs after login."""
+    from app.models import Collaborator
+    from app.routers.users import _GOOGLE_INVITE_STATE_PREFIX
+    from tests.factories import make_invitation, make_role, make_user, make_workspace
+
+    owner = make_user(db)
+    ws = make_workspace(db, owner)
+    agency_role = make_role(db, "Agency")
+    google_email = _unique_email()
+    invitee = make_user(db, email=google_email)
+    inv = make_invitation(db, ws.workspace_id, owner.user_id, invitee.email, agency_role)
+
+    google_sub = f"google_sub_{uuid.uuid4().hex}"
+    _mock_google_http(
+        mocker,
+        token_json={"access_token": "goog_at_invite"},
+        userinfo_json={
+            "sub": google_sub,
+            "email": google_email,
+            "given_name": "Pat",
+            "family_name": "Lee",
+        },
+    )
+
+    state = f"{_GOOGLE_INVITE_STATE_PREFIX}{inv.token}"
+    resp = client.get(
+        f"/auth/google/callback?code=fake_code&state={quote(state)}",
+        follow_redirects=False,
+    )
+    assert resp.status_code == 307
+    assert resp.headers["location"].rstrip("/").endswith("/dashboard")
+
+    collab = (
+        db.query(Collaborator)
+        .filter(
+            Collaborator.user_id == invitee.user_id,
+            Collaborator.workspace_id == ws.workspace_id,
+            Collaborator.invite_status == "accepted",
+        )
+        .first()
+    )
+    assert collab is not None
+    assert collab.role_id == agency_role.role_id
+
+
+def test_google_callback_invite_email_mismatch_redirects_to_accept_page(client, db, mocker):
+    """Wrong Google account vs invitation redirects to the accept page (still logged in)."""
+    from app.routers.users import _GOOGLE_INVITE_STATE_PREFIX
+    from tests.factories import make_invitation, make_role, make_user, make_workspace
+
+    owner = make_user(db)
+    ws = make_workspace(db, owner)
+    agency_role = make_role(db, "Agency")
+    invited_email = "invited_only@example.com"
+    make_user(db, email=invited_email)
+    inv = make_invitation(db, ws.workspace_id, owner.user_id, invited_email, agency_role)
+
+    google_sub = f"google_sub_{uuid.uuid4().hex}"
+    _mock_google_http(
+        mocker,
+        token_json={"access_token": "goog_at_wrong"},
+        userinfo_json={
+            "sub": google_sub,
+            "email": "someone_else@example.com",
+            "given_name": "X",
+            "family_name": "Y",
+        },
+    )
+
+    state = f"{_GOOGLE_INVITE_STATE_PREFIX}{inv.token}"
+    resp = client.get(
+        f"/auth/google/callback?code=fake_code&state={quote(state)}",
+        follow_redirects=False,
+    )
+    assert resp.status_code == 307
+    loc = resp.headers["location"]
+    assert f"/invitations/accept/{inv.token}" in loc
 
 
 def test_login_without_remember_me_sets_session_cookie(client, db, mocker):

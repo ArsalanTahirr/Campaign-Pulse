@@ -1,5 +1,10 @@
 import DashboardShell from "@/components/dashboard/DashboardShell";
+import { WorkspaceProvider } from "@/contexts/WorkspaceContext";
 
 export default function DashboardLayout({ children }) {
-  return <DashboardShell>{children}</DashboardShell>;
+  return (
+    <WorkspaceProvider>
+      <DashboardShell>{children}</DashboardShell>
+    </WorkspaceProvider>
+  );
 }
