@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, Home, Inbox, Mail, Send, Sparkles, TrendingUp, AlertCircle } from "lucide-react";
+import DatePickerPopover from "@/components/ui/DatePickerPopover";
+import GenderSelect from "@/components/ui/GenderSelect";
 
 function GoogleIcon({ className = "h-5 w-5" }) {
   return (
@@ -111,6 +113,7 @@ export default function SignupPage() {
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   function sanitizeTextInput(value) {
     return value.replace(/[<>&"'`]/g, "");
@@ -127,14 +130,47 @@ export default function SignupPage() {
     setSubmitError("");
   }
 
+  function parseDateOnly(dateValue) {
+    // Handles date inputs like "YYYY-MM-DD" in a timezone-stable way.
+    if (typeof dateValue !== "string") return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const monthIndex = Number(match[2]) - 1; // JS months are 0-based
+    const day = Number(match[3]);
+
+    const date = new Date(year, monthIndex, day);
+    // Guard against invalid dates like 2026-02-31 (JS will roll over).
+    if (Number.isNaN(date.getTime())) return null;
+    if (date.getFullYear() !== year || date.getMonth() !== monthIndex || date.getDate() !== day) return null;
+    return date;
+  }
+
+  function isDobInFuture(dateOfBirth) {
+    const dobDate = parseDateOnly(dateOfBirth);
+    if (!dobDate) return false;
+
+    const now = new Date();
+    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return dobDate.getTime() > todayDate.getTime();
+  }
+
   function isAtLeast18(dateOfBirth) {
     if (!dateOfBirth) return false;
-    const dob = new Date(dateOfBirth);
-    if (Number.isNaN(dob.getTime())) return false;
+
+    // Explicitly reject future DOBs.
+    if (isDobInFuture(dateOfBirth)) return false;
+
+    const dob = parseDateOnly(dateOfBirth);
+    if (!dob) return false;
+
     const today = new Date();
-    let age = today.getFullYear() - dob.getFullYear();
-    const monthDelta = today.getMonth() - dob.getMonth();
-    if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < dob.getDate())) {
+    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    let age = todayDate.getFullYear() - dob.getFullYear();
+    const monthDelta = todayDate.getMonth() - dob.getMonth();
+    if (monthDelta < 0 || (monthDelta === 0 && todayDate.getDate() < dob.getDate())) {
       age -= 1;
     }
     return age >= 18;
@@ -158,6 +194,8 @@ export default function SignupPage() {
     if (step === 2) {
       if (!formData.dob) {
         nextErrors.dob = "Please provide your date of birth.";
+      } else if (isDobInFuture(formData.dob)) {
+        nextErrors.dob = "Date of birth cannot be in the future.";
       } else if (!isAtLeast18(formData.dob)) {
         nextErrors.dob = "You must be 18 or older to register.";
       }
@@ -205,6 +243,8 @@ export default function SignupPage() {
     if (field === "dob") {
       if (!value) {
         nextErrors.dob = "Please provide your date of birth.";
+      } else if (isDobInFuture(value)) {
+        nextErrors.dob = "Date of birth cannot be in the future.";
       } else if (!isAtLeast18(value)) {
         nextErrors.dob = "You must be 18 or older to register.";
       } else delete nextErrors.dob;
@@ -246,6 +286,7 @@ export default function SignupPage() {
     if (!validateStep(3)) return;
 
     setSubmitError("");
+    setSuccessMessage("");
     setIsSubmitting(true);
 
     try {
@@ -285,6 +326,17 @@ export default function SignupPage() {
         }
         throw new Error(message);
       }
+
+      let message = "We've sent a verification link to your email. Please open your inbox and click the link to activate your account.";
+      try {
+        const data = await response.json();
+        if (typeof data?.detail === "string" && data.detail.trim()) {
+          message = data.detail;
+        }
+      } catch {
+        // Keep default success message.
+      }
+      setSuccessMessage(message);
     } catch (error) {
       setSubmitError(error?.message || "We couldn't complete signup right now. Please try again.");
     } finally {
@@ -424,25 +476,15 @@ export default function SignupPage() {
                       <label htmlFor="dob" className="mb-2 block text-sm font-medium text-slate-700">
                         Date of birth
                       </label>
-                      <div className={`relative ${errors.dob ? "animate-shake" : ""}`}>
-                        <input
+                      <div className={errors.dob ? "animate-shake" : ""}>
+                        <DatePickerPopover
                           id="dob"
-                          name="dob"
-                          type="date"
                           value={formData.dob}
-                          onChange={(e) => updateField("dob", e.target.value)}
+                          onChange={(v) => updateField("dob", v)}
                           onBlur={() => validateSignupField("dob")}
-                          className={`h-12 w-full rounded-xl border bg-white px-4 text-sm outline-none transition [color-scheme:light] ${
-                            errors.dob
-                              ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
-                              : "border-slate-200 text-slate-900 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
-                          }`}
+                          error={errors.dob}
+                          placeholder="Select your birth date"
                         />
-                      </div>
-                      <div className={`grid transition-all duration-300 ease-in-out ${errors.dob ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
-                        <div className="overflow-hidden">
-                          <p className="text-xs text-red-600">{errors.dob}</p>
-                        </div>
                       </div>
                     </div>
 
@@ -450,34 +492,14 @@ export default function SignupPage() {
                       <label htmlFor="gender" className="mb-2 block text-sm font-medium text-slate-700">
                         Gender
                       </label>
-                      <div className={`relative ${errors.gender ? "animate-shake" : ""}`}>
-                        <select
+                      <div className={errors.gender ? "animate-shake" : ""}>
+                        <GenderSelect
                           id="gender"
-                          name="gender"
                           value={formData.gender}
-                          onChange={(e) => updateField("gender", e.target.value)}
+                          onChange={(v) => updateField("gender", v)}
                           onBlur={() => validateSignupField("gender")}
-                          className={`h-12 w-full cursor-pointer appearance-none rounded-xl border bg-white px-4 pr-10 text-sm outline-none transition ${
-                            errors.gender
-                              ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
-                              : "border-slate-200 text-slate-900 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
-                          }`}
-                        >
-                          <option value="">Select an option</option>
-                          <option value="male">Male</option>
-                          <option value="female">Female</option>
-                          <option value="prefer_not">Prefer not to say</option>
-                        </select>
-                        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </span>
-                      </div>
-                      <div className={`grid transition-all duration-300 ease-in-out ${errors.gender ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
-                        <div className="overflow-hidden">
-                          <p className="text-xs text-red-600">{errors.gender}</p>
-                        </div>
+                          error={errors.gender}
+                        />
                       </div>
                     </div>
 
@@ -597,13 +619,31 @@ export default function SignupPage() {
                       </div>
                     </div>
 
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700"
-                    >
-                      {isSubmitting ? "Creating account..." : "Join Now"}
-                    </button>
+                    {successMessage ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm"
+                      >
+                        <p className="text-sm font-semibold text-emerald-800">
+                          Verification email sent
+                        </p>
+                        <p className="mt-1 text-sm leading-relaxed text-emerald-700">
+                          {successMessage}
+                        </p>
+                        <p className="mt-2 text-xs text-emerald-700/90">
+                          If you don't see it, check your spam or promotions folder.
+                        </p>
+                      </motion.div>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {isSubmitting ? "Creating account..." : "Join Now"}
+                      </button>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
