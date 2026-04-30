@@ -35,6 +35,10 @@ SMTP_APP_PASSWORD: str = os.environ.get("SMTP_APP_PASSWORD", "")
 EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "")
 FRONTEND_URL: str = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 FRONTEND_RESET_PASSWORD_PATH: str = os.environ.get("FRONTEND_RESET_PASSWORD_PATH", "/reset-password")
+FRONTEND_INVITATION_ACCEPT_PATH: str = os.environ.get(
+    "FRONTEND_INVITATION_ACCEPT_PATH",
+    "/invitations/accept",
+)
 
 # The icon lives at public/icon.png in the Next.js project, served at /icon.png.
 LOGO_URL: str = f"{FRONTEND_URL}/icon.png"
@@ -362,6 +366,56 @@ def send_account_link_email(
     message["From"] = f"CampaignPulse <{sender}>"
     message["To"] = to_email
     message["Subject"] = "Verify to link password login"
+    message.set_content(text_body)
+    message.add_alternative(html_body, subtype="html")
+
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        smtp.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
+        smtp.send_message(message)
+
+
+def send_invitation_email(
+    to_email: str,
+    token: str,
+    workspace_name: str,
+    inviter_name: str,
+    role_name: str,
+) -> None:
+    """
+    Send workspace invitation email containing token acceptance URL.
+    """
+    invite_url = f"{FRONTEND_URL}{FRONTEND_INVITATION_ACCEPT_PATH}/{token}"
+    sender = EMAIL_FROM or SMTP_EMAIL
+    if not sender:
+        raise RuntimeError("SMTP sender is not configured. Set EMAIL_FROM or SMTP_EMAIL.")
+    if not SMTP_EMAIL or not SMTP_APP_PASSWORD:
+        raise RuntimeError("SMTP credentials missing. Set SMTP_EMAIL and SMTP_APP_PASSWORD.")
+
+    text_body = (
+        f"Hi,\n\n"
+        f"{inviter_name} invited you to join '{workspace_name}' as {role_name} on CampaignPulse.\n\n"
+        f"Accept invitation:\n{invite_url}\n\n"
+        "This invite expires in 72 hours."
+    )
+    html_body = f"""
+<html>
+  <body style="font-family:Arial,sans-serif;color:#1f2937;">
+    <h2>You are invited to CampaignPulse</h2>
+    <p>{inviter_name} invited you to join <strong>{workspace_name}</strong> as <strong>{role_name}</strong>.</p>
+    <p>
+      <a href="{invite_url}" style="display:inline-block;padding:10px 16px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;">
+        Accept Invitation
+      </a>
+    </p>
+    <p style="font-size:13px;color:#6b7280;">This invitation expires in 72 hours.</p>
+  </body>
+</html>
+""".strip()
+
+    message = EmailMessage()
+    message["From"] = f"CampaignPulse <{sender}>"
+    message["To"] = to_email
+    message["Subject"] = f"You are invited to {workspace_name} on CampaignPulse"
     message.set_content(text_body)
     message.add_alternative(html_body, subtype="html")
 

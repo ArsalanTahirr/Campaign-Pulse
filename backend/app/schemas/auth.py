@@ -1,5 +1,10 @@
 """
-schemas.py — Pydantic v2 request / response models for CampaignPulse auth flows.
+schemas/auth.py — Pydantic v2 request / response models for CampaignPulse auth flows.
+
+Migrated from the top-level schemas.py to allow the schemas/ package to own
+all Pydantic models while keeping full backward-compatibility: routers/users.py
+imports these via `from app.schemas import LoginRequest, ...` which now resolves
+through schemas/__init__.py.
 
 All field constraints are kept in sync with the React signup form
 (app/(auth)/signup/page.jsx) so that client-side and server-side rules
@@ -53,17 +58,11 @@ class SignupRequest(BaseModel):
     # The frontend sends this as a boolean; it must be True.
     terms_accepted: bool = False
 
-    # ------------------------------------------------------------------
-    # Validators
-    # ------------------------------------------------------------------
-
     @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
         """
         Mirrors the frontend regex: /^(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}$/
-        An additional lowercase check is enforced at the backend layer for
-        defense-in-depth (the frontend only checks uppercase, digit, special).
         """
         errors: list[str] = []
         if len(v) < 8:
@@ -81,9 +80,6 @@ class SignupRequest(BaseModel):
     @field_validator("date_of_birth")
     @classmethod
     def validate_age(cls, v: Optional[date]) -> Optional[date]:
-        """
-        Mirrors isAtLeast18() in the frontend — rejects users under 18.
-        """
         if v is None:
             return v
         today = date.today()

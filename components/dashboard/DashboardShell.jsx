@@ -6,6 +6,7 @@ import { Space_Grotesk } from "next/font/google";
 import { usePathname, useRouter } from "next/navigation";
 import Sidebar from "@/components/dashboard/Sidebar";
 import { toast } from "sonner";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -17,6 +18,7 @@ const titleByPrefix = {
   "/dashboard/campaigns": "Campaigns",
   "/dashboard/unibox": "Unibox",
   "/dashboard/analytics": "Analytics",
+  "/dashboard/collaborators": "Collaborators",
 };
 
 export default function DashboardShell({ children }) {
@@ -24,8 +26,10 @@ export default function DashboardShell({ children }) {
   const pathname = usePathname();
   const [isOrgMenuOpen, setIsOrgMenuOpen] = useState(false);
   const [orgSearch, setOrgSearch] = useState("");
-  const [selectedOrg, setSelectedOrg] = useState("My Organization");
   const [currentUser, setCurrentUser] = useState(null);
+  const { workspace, workspaces, switchWorkspace, createWorkspace } = useWorkspace();
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [hasPendingWelcomeToast, setHasPendingWelcomeToast] = useState(false);
   const [fallbackWelcomeName, setFallbackWelcomeName] = useState("");
   const orgMenuRef = useRef(null);
@@ -62,6 +66,37 @@ export default function DashboardShell({ children }) {
     loadCurrentUser();
     return () => {
       isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    let refreshing = false;
+
+    async function refreshSessionSilently() {
+      if (refreshing) return;
+      if (document.visibilityState !== "visible") return;
+      refreshing = true;
+      try {
+        await fetch(`${API_BASE_URL}/auth/me`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+      } catch {
+        // Silent keepalive should never disrupt UI.
+      } finally {
+        refreshing = false;
+      }
+    }
+
+    const intervalId = window.setInterval(refreshSessionSilently, 5 * 60 * 1000);
+    window.addEventListener("focus", refreshSessionSilently);
+    document.addEventListener("visibilitychange", refreshSessionSilently);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshSessionSilently);
+      document.removeEventListener("visibilitychange", refreshSessionSilently);
     };
   }, []);
 
@@ -121,6 +156,28 @@ export default function DashboardShell({ children }) {
     // Settings surface is planned; keep entry point in account menu.
   }
 
+  async function handleCreateWorkspace(event) {
+    event.preventDefault();
+    const name = newWorkspaceName.trim();
+    if (!name) return;
+    try {
+      await createWorkspace(name);
+      toast.success(`Workspace "${name}" created!`);
+      setNewWorkspaceName("");
+      setIsCreatingWorkspace(false);
+      setIsOrgMenuOpen(false);
+    } catch (err) {
+      toast.error(err.message || "Failed to create workspace.");
+    }
+  }
+
+  const filteredWorkspaces = useMemo(() => {
+    if (!orgSearch.trim()) return workspaces;
+    return workspaces.filter((w) =>
+      w.name.toLowerCase().includes(orgSearch.toLowerCase())
+    );
+  }, [workspaces, orgSearch]);
+
   const activeTitle = useMemo(() => {
     for (const [prefix, title] of Object.entries(titleByPrefix)) {
       if (pathname?.startsWith(prefix)) return title;
@@ -129,9 +186,9 @@ export default function DashboardShell({ children }) {
   }, [pathname]);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-slate-50/60 transition-colors duration-300 dark:bg-slate-950">
+    <div className="flex h-screen min-h-0 w-full overflow-hidden bg-slate-50/60 transition-colors duration-300 dark:bg-slate-950">
       <Sidebar user={currentUser} onLogout={handleLogout} onSettings={handleSettings} />
-      <main className="flex flex-1 flex-col overflow-hidden transition-colors duration-300">
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden transition-colors duration-300">
         <header className="sticky top-0 z-50 flex h-20 items-center justify-between border-b border-slate-200 bg-white/95 px-6 backdrop-blur transition-colors duration-300 sm:px-8 dark:border-slate-800 dark:bg-slate-900/95">
           <h1
             className={[
@@ -155,7 +212,7 @@ export default function DashboardShell({ children }) {
               onFocus={() => setIsOrgMenuOpen(true)}
               className="inline-flex min-w-[220px] items-center justify-between rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-base font-medium text-slate-600 shadow-sm transition-all duration-300 hover:border-blue-300 hover:shadow dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
             >
-              <span className="max-w-[160px] truncate">{selectedOrg}</span>
+              <span className="max-w-[160px] truncate">{workspace?.name || "Select Workspace"}</span>
               <ChevronDown
                 className={[
                   "h-5 w-5 text-slate-500 transition-transform duration-200 dark:text-slate-400",
@@ -177,35 +234,73 @@ export default function DashboardShell({ children }) {
                   />
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedOrg("My Organization");
-                    setIsOrgMenuOpen(false);
-                  }}
-                  className="group flex h-16 w-full items-center bg-blue-400 px-7 text-base font-medium text-white transition-all duration-200 hover:bg-blue-500"
-                >
-                  <span className="transition-transform duration-200 group-hover:translate-x-0.5">
-                    My Organization
-                  </span>
-                </button>
+                {filteredWorkspaces.map((ws) => (
+                  <button
+                    key={ws.workspace_id}
+                    type="button"
+                    onClick={() => {
+                      switchWorkspace(ws);
+                      setIsOrgMenuOpen(false);
+                    }}
+                    className={[
+                      "group flex h-16 w-full items-center px-7 text-base font-medium transition-all duration-200",
+                      workspace?.workspace_id === ws.workspace_id
+                        ? "bg-blue-400 text-white hover:bg-blue-500"
+                        : "text-slate-900 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800",
+                    ].join(" ")}
+                  >
+                    <span className="truncate transition-transform duration-200 group-hover:translate-x-0.5">
+                      {ws.name}
+                    </span>
+                  </button>
+                ))}
 
                 <div className="h-3 border-y border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800" />
 
-                <button
-                  type="button"
-                  className="group flex h-16 w-full items-center gap-2.5 px-7 text-base font-medium text-slate-900 transition-all duration-200 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
-                >
-                  <Plus className="h-5 w-5 text-blue-600 transition-transform duration-200 group-hover:scale-110" />
-                  <span className="transition-transform duration-200 group-hover:translate-x-0.5">
-                    Create Workspace
-                  </span>
-                </button>
+                {isCreatingWorkspace ? (
+                  <form
+                    onSubmit={handleCreateWorkspace}
+                    className="flex items-center gap-2 px-4 py-3"
+                  >
+                    <input
+                      autoFocus
+                      type="text"
+                      value={newWorkspaceName}
+                      onChange={(e) => setNewWorkspaceName(e.target.value)}
+                      placeholder="Workspace name…"
+                      className="h-9 flex-1 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 outline-none focus:border-blue-300"
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      Create
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingWorkspace(false)}
+                      className="rounded-lg px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingWorkspace(true)}
+                    className="group flex h-16 w-full items-center gap-2.5 px-7 text-base font-medium text-slate-900 transition-all duration-200 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <Plus className="h-5 w-5 text-blue-600 transition-transform duration-200 group-hover:scale-110" />
+                    <span className="transition-transform duration-200 group-hover:translate-x-0.5">
+                      Create Workspace
+                    </span>
+                  </button>
+                )}
               </div>
             ) : null}
           </div>
         </header>
-        <div className="flex flex-1 overflow-y-auto transition-colors duration-300">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden transition-colors duration-300">{children}</div>
       </main>
     </div>
   );

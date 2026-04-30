@@ -46,5 +46,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // /invitations/accept/[token] is intentionally public — authentication
+  // is handled inside the page component itself (redirects to login if needed).
   matcher: ["/dashboard/:path*", "/login", "/auth/login"],
 };
