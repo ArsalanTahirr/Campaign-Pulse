@@ -2,6 +2,7 @@ import "./globals.css";
 import { Inter } from "next/font/google";
 import ThemeProvider from "@/components/providers/ThemeProvider";
 import AppToaster from "@/components/providers/AppToaster";
+import Navbar from "@/components/landing/Navbar";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,6 +21,7 @@ export default function RootLayout({ children }) {
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.className} transition-colors duration-300`}>
         <ThemeProvider>
+          <Navbar />
           {children}
           <AppToaster />
         </ThemeProvider>
