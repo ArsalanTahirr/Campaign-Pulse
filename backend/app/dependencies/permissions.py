@@ -35,6 +35,7 @@ PERMISSION_MATRIX: dict[str, set[str]] = {
     "manage_email_accounts":  {"Owner", "Agency", "Marketing Manager"},
     "view_workspace":         {"Owner", "Agency", "Marketing Manager", "Data Analyst"},
     "edit_workspace":         {"Owner"},
+    "manage_leads":           {"Owner", "Agency", "Marketing Manager"},
 }
 
 

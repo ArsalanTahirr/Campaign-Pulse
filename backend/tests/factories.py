@@ -12,6 +12,7 @@ Key ORM naming conventions mirrored here:
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from app.auth import create_access_token, hash_password
 from app.models import (
@@ -26,6 +27,8 @@ from app.models import (
     SenderAccount,
     SequenceStep,
     StepEmail,
+    UniboxMessage,
+    UniboxThread,
     User,
     Workspace,
 )
@@ -228,6 +231,83 @@ def make_email_event(
     db.add(event)
     db.commit()
     return event
+
+
+def make_unibox_thread(
+    db,
+    workspace_id,
+    sender_account,
+    lead=None,
+    campaign=None,
+    subject="Test Thread",
+    is_orphan=None,
+):
+    """Create a UniboxThread with at least one inbound UniboxMessage."""
+    if is_orphan is None:
+        is_orphan = lead is None
+    thread = UniboxThread(
+        workspace_id=workspace_id,
+        lead_id=lead.lead_id if lead else None,
+        campaign_id=campaign.campaign_id if campaign else None,
+        subject=subject,
+        is_orphan=is_orphan,
+    )
+    db.add(thread)
+    db.flush()
+
+    msg = UniboxMessage(
+        thread_id=thread.thread_id,
+        sender_account_id=sender_account.account_id,
+        lead_id=lead.lead_id if lead else None,
+        direction="inbound",
+        message_id_header=f"<{uuid.uuid4()}@test.example.com>",
+        from_address=lead.email if lead else f"unknown_{uuid.uuid4().hex[:6]}@external.com",
+        to_addresses=[sender_account.email],
+        subject=subject,
+        body_text="Hello, this is a test message.",
+        is_read=False,
+        is_orphan=is_orphan,
+        status="received",
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(thread)
+    return thread
+
+
+def make_unibox_message(
+    db,
+    thread,
+    sender_account,
+    lead=None,
+    direction="inbound",
+    subject=None,
+    body_text="Test body",
+    is_read=False,
+    status=None,
+):
+    """Add an additional UniboxMessage to an existing thread."""
+    if status is None:
+        status = "received" if direction == "inbound" else "sent"
+    msg = UniboxMessage(
+        thread_id=thread.thread_id,
+        sender_account_id=sender_account.account_id,
+        lead_id=lead.lead_id if lead else None,
+        direction=direction,
+        message_id_header=f"<{uuid.uuid4()}@test.example.com>",
+        from_address=lead.email if lead else sender_account.email,
+        to_addresses=[sender_account.email],
+        subject=subject or thread.subject,
+        body_text=body_text,
+        is_read=is_read,
+        is_orphan=lead is None,
+        status=status,
+        sent_at=datetime.now(timezone.utc) if direction == "outbound" else None,
+        received_at=datetime.now(timezone.utc) if direction == "inbound" else None,
+    )
+    db.add(msg)
+    db.commit()
+    return msg
 
 
 def make_invitation(db, workspace_id, invited_by, invitee_email, role, status="pending", expired=False):

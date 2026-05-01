@@ -28,6 +28,7 @@ from app.routers import (
     engine_ops,
     track,
     analytics,
+    unibox,
 )
 from app.workers.engine_loops import imap_reply_loop, sending_loop, warmup_loop
 
@@ -148,6 +149,13 @@ app.include_router(
     analytics.router,
     prefix="/workspaces/{workspace_id}/analytics",
     tags=["Analytics"],
+)
+
+# Unibox — unified inbox
+app.include_router(
+    unibox.router,
+    prefix="/workspaces/{workspace_id}/unibox",
+    tags=["Unibox"],
 )
 
 

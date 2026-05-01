@@ -1065,6 +1065,21 @@ class Lead(Base):
         comment="True when this lead's reply is flagged as a high-quality opportunity.",
     )
 
+    # Unibox pipeline stage — tracks where in the sales funnel this lead sits.
+    # Semantically distinct from lead_status (deliverability): a lead can be
+    # 'active' (deliverability) and 'interested' (pipeline) simultaneously.
+    # Values: lead | interested | meeting-booked | meeting-completed | won
+    pipeline_status = Column(
+        String(30),
+        nullable=False,
+        default="lead",
+        server_default=text("'lead'"),
+        comment=(
+            "Sales pipeline stage for Unibox Status view. "
+            "Values: lead | interested | meeting-booked | meeting-completed | won."
+        ),
+    )
+
     # The same email address must not appear twice in the same campaign.
     # Re-enrolling a contact in a new campaign creates a new Lead row in that
     # campaign — it does not reuse or modify this one.
@@ -2061,3 +2076,317 @@ class CampaignRun(Base):
     # --- Relationships ---
     campaign = relationship("Campaign", back_populates="runs")
     actor = relationship("User", foreign_keys=[triggered_by])
+
+
+# ===========================================================================
+# UNIBOX CLUSTER
+# ===========================================================================
+
+
+class UniboxThread(Base):
+    """
+    Groups all messages belonging to the same email conversation (thread).
+
+    One row per unique conversation, scoped to a workspace. Optionally linked
+    to a lead (via lead_id) and/or campaign (via campaign_id). When the
+    sender does not match any known lead, is_orphan is set to True and
+    lead_id / campaign_id remain NULL.
+
+    Threading is resolved by the ThreadingService using RFC 2822 headers
+    (Message-ID, In-Reply-To, References) from the UniboxMessage rows.
+
+    last_message_at is updated every time a new message is added to the
+    thread, enabling the inbox to be sorted by recency.
+    """
+
+    __tablename__ = "unibox_thread"
+
+    thread_id = Column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=_UUID_DEFAULT,
+        comment="Unique identifier for this conversation thread.",
+    )
+
+    workspace_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("workspace.workspace_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="FK to workspace — every thread belongs to exactly one workspace.",
+    )
+
+    lead_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("lead.lead_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to lead — NULL for orphan threads (unknown sender).",
+    )
+
+    campaign_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("campaign.campaign_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to campaign — optional campaign tag on this thread.",
+    )
+
+    subject = Column(
+        Text,
+        nullable=False,
+        comment="Thread subject line (from the first message).",
+    )
+
+    last_message_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp of the most recent message in this thread.",
+    )
+
+    # True when no matching lead was found for any message in the thread.
+    # Enforced consistent with lead_id via ck_unibox_thread_orphan_lead.
+    is_orphan = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        comment="True when no matching lead was found for any message in this thread.",
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp when this thread record was created.",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(is_orphan = false AND lead_id IS NOT NULL)"
+            " OR "
+            "(is_orphan = true AND lead_id IS NULL)",
+            name="ck_unibox_thread_orphan_lead",
+        ),
+        Index("idx_unibox_thread_workspace_last_msg", "workspace_id", "last_message_at"),
+        Index("idx_unibox_thread_lead_id", "lead_id"),
+        Index("idx_unibox_thread_campaign_id", "campaign_id"),
+        Index("idx_unibox_thread_workspace_orphan", "workspace_id", "is_orphan"),
+    )
+
+    # --- Relationships ---
+    workspace = relationship("Workspace")
+    lead = relationship("Lead")
+    campaign = relationship("Campaign")
+    messages = relationship(
+        "UniboxMessage",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="UniboxMessage.created_at",
+    )
+
+
+class UniboxMessage(Base):
+    """
+    Stores the full content of every individual email in the Unibox.
+
+    Both inbound messages (replies from leads or unknown senders fetched via
+    IMAP) and outbound messages (manual replies sent via the Unibox reply
+    composer) are stored here.
+
+    message_id_header carries the RFC 2822 Message-ID header value and is
+    UNIQUE — this is the idempotency key that prevents duplicate ingestion
+    if the same message is fetched more than once (e.g. on IMAP re-poll).
+
+    in_reply_to and references_header carry the RFC 2822 threading headers
+    used by ThreadingService to resolve which thread a message belongs to.
+
+    search_vector is a PostgreSQL tsvector computed at insert time from
+    subject + body_text + from_address, indexed with a GIN index for
+    full-text search.
+
+    is_orphan mirrors the parent thread's is_orphan flag for fast per-message
+    filtering without joining to unibox_thread.
+    """
+
+    __tablename__ = "unibox_message"
+
+    message_id = Column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=_UUID_DEFAULT,
+        comment="Unique identifier for this email message.",
+    )
+
+    thread_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("unibox_thread.thread_id", ondelete="CASCADE"),
+        nullable=False,
+        comment="FK to unibox_thread — the conversation this message belongs to.",
+    )
+
+    sender_account_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("sender_account.account_id", ondelete="RESTRICT"),
+        nullable=False,
+        comment="FK to sender_account — which inbox received or sent this message.",
+    )
+
+    lead_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("lead.lead_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to lead — NULL for orphan messages from unknown senders.",
+    )
+
+    # Optional cross-link to the EmailEvent record from the campaign engine
+    # (e.g. the 'sent' event that originally delivered the message the lead is
+    # replying to).  SET NULL if the event is later deleted.
+    email_event_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("email_event.event_id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to email_event — optional cross-link for campaign send events.",
+    )
+
+    # 'inbound' — received from a lead or unknown sender via IMAP.
+    # 'outbound' — sent by a workspace member via the Unibox reply composer.
+    direction = Column(
+        String(10),
+        nullable=False,
+        comment="Message direction: inbound | outbound.",
+    )
+
+    # RFC 2822 Message-ID header (e.g. '<uuid@mail.example.com>').
+    # UNIQUE constraint enforces idempotent ingestion.
+    message_id_header = Column(
+        Text,
+        nullable=False,
+        unique=True,
+        comment="RFC 2822 Message-ID header. UNIQUE ensures idempotent ingestion.",
+    )
+
+    in_reply_to = Column(
+        Text,
+        nullable=True,
+        comment="RFC 2822 In-Reply-To header — references the immediate parent message.",
+    )
+
+    references_header = Column(
+        Text,
+        nullable=True,
+        comment="RFC 2822 References header — full ancestor Message-ID chain.",
+    )
+
+    from_address = Column(
+        Text,
+        nullable=False,
+        comment="Sender email address (the From header value).",
+    )
+
+    to_addresses = Column(
+        "to_addresses",
+        type_=__import__("sqlalchemy.dialects.postgresql", fromlist=["ARRAY"]).ARRAY(Text),
+        nullable=False,
+        comment="Array of recipient email addresses.",
+    )
+
+    cc_addresses = Column(
+        "cc_addresses",
+        type_=__import__("sqlalchemy.dialects.postgresql", fromlist=["ARRAY"]).ARRAY(Text),
+        nullable=True,
+        comment="Array of CC email addresses (nullable).",
+    )
+
+    subject = Column(
+        Text,
+        nullable=False,
+        comment="Email subject line.",
+    )
+
+    body_text = Column(
+        Text,
+        nullable=True,
+        comment="Plain-text body of the email.",
+    )
+
+    body_html = Column(
+        Text,
+        nullable=True,
+        comment="HTML body of the email.",
+    )
+
+    is_read = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        comment="Whether this message has been read by a workspace member.",
+    )
+
+    is_orphan = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        comment="True when the sender does not match any known lead in the workspace.",
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        comment="Message status: received | sent | failed | draft.",
+    )
+
+    received_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when this inbound message was received (IMAP Date header).",
+    )
+
+    sent_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when this outbound message was sent.",
+    )
+
+    # Populated by ingestion/reply service at insert time.
+    # Value: to_tsvector('english', coalesce(subject,'') || ' ' ||
+    #                               coalesce(body_text,'') || ' ' ||
+    #                               coalesce(from_address,''))
+    search_vector = Column(
+        __import__("sqlalchemy.dialects.postgresql", fromlist=["TSVECTOR"]).TSVECTOR,
+        nullable=True,
+        comment="PostgreSQL tsvector for FTS. Populated at insert time.",
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp when this message record was created.",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "direction IN ('inbound', 'outbound')",
+            name="ck_unibox_message_direction",
+        ),
+        CheckConstraint(
+            "status IN ('received', 'sent', 'failed', 'draft')",
+            name="ck_unibox_message_status",
+        ),
+        CheckConstraint(
+            "(direction = 'inbound' AND status IN ('received', 'failed'))"
+            " OR "
+            "(direction = 'outbound' AND status IN ('sent', 'failed', 'draft'))",
+            name="ck_unibox_message_direction_status",
+        ),
+        Index("idx_unibox_message_thread_created", "thread_id", "created_at"),
+        Index("idx_unibox_message_sender_account", "sender_account_id"),
+        Index("idx_unibox_message_lead_id", "lead_id"),
+        Index("idx_unibox_message_direction_created", "direction", "created_at"),
+    )
+
+    # --- Relationships ---
+    thread = relationship("UniboxThread", back_populates="messages")
+    sender_account = relationship("SenderAccount")
+    lead = relationship("Lead")
