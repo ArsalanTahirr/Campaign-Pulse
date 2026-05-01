@@ -1,7 +1,16 @@
 import Hero from "@/components/landing/Hero";
 import Features from "@/components/landing/Features";
 import SocialProof from "@/components/landing/SocialProof";
-import Footer from "@/components/landing/Footer";
+
+export const metadata = {
+  title: "CampaignPulse",
+  description: "CampaignPulse helps teams automate cold email outreach with confidence.",
+  icons: {
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png"
+  }
+};
 
 export default function HomePage() {
   return (
@@ -9,7 +18,6 @@ export default function HomePage() {
       <Hero />
       <Features />
       <SocialProof />
-      <Footer />
     </main>
   );
 }
