@@ -18,6 +18,7 @@ from app.models import (
     Campaign,
     CampaignSenderPool,
     Collaborator,
+    EmailEvent,
     Invitation,
     Lead,
     LocalAuth,
@@ -116,13 +117,21 @@ def auth_cookies(user):
     return {"access_token": token}
 
 
-def make_campaign(db, workspace_id, creator_id=None, name="Test Campaign", status="draft"):
+def make_campaign(
+    db,
+    workspace_id,
+    creator_id=None,
+    name="Test Campaign",
+    status="draft",
+    open_tracking_enabled=True,
+):
     campaign = Campaign(
         campaign_id=str(uuid.uuid4()),
         workspace_id=workspace_id,
         created_by=creator_id,
         campaign_name=name,
         status=status,
+        open_tracking_enabled=open_tracking_enabled,
     )
     db.add(campaign)
     db.commit()
@@ -178,17 +187,47 @@ def make_step_email(db, step_id, subject="Subject", body="Body text"):
     return variant
 
 
-def make_lead(db, campaign_id, email=None, lead_status="active"):
+def make_lead(db, campaign_id, email=None, lead_status="active", is_opportunity=False):
     email = email or f"lead_{uuid.uuid4().hex[:8]}@example.com"
     lead = Lead(
         lead_id=str(uuid.uuid4()),
         campaign_id=campaign_id,
         email=email,
         lead_status=lead_status,
+        is_opportunity=is_opportunity,
     )
     db.add(lead)
     db.commit()
     return lead
+
+
+def make_email_event(
+    db,
+    lead_id,
+    event_type,
+    sender_account_id=None,
+    step_id=None,
+    occurred_at=None,
+):
+    """
+    Create and persist a single EmailEvent row for use in analytics tests.
+
+    event_type examples: 'sent', 'opened', 'clicked', 'replied', 'bounced'
+    event_scope is always 'lead' (warmup events are excluded from analytics).
+    occurred_at defaults to now if not provided.
+    """
+    event = EmailEvent(
+        event_id=str(uuid.uuid4()),
+        lead_id=lead_id,
+        step_id=step_id,
+        event_type=event_type,
+        event_scope="lead",
+        sender_account_id=sender_account_id,
+        occurred_at=occurred_at or datetime.now(timezone.utc),
+    )
+    db.add(event)
+    db.commit()
+    return event
 
 
 def make_invitation(db, workspace_id, invited_by, invitee_email, role, status="pending", expired=False):

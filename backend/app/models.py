@@ -728,6 +728,17 @@ class Campaign(Base):
         comment="Legacy campaign schedule JSONB (unused by API; use sequence_step.send_days).",
     )
 
+    # Controls whether open-tracking pixels are injected into outbound emails
+    # for this campaign.  When False, open events will not be recorded and the
+    # analytics layer returns opened: 0 with tracking_enabled: false.
+    open_tracking_enabled = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+        comment="When False, open-tracking pixels are not injected and opens are not recorded.",
+    )
+
     created_at = Column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -1041,6 +1052,17 @@ class Lead(Base):
         ForeignKey("lead_import_session.session_id", ondelete="SET NULL"),
         nullable=True,
         comment="FK to lead_import_session — NULL for manually added leads.",
+    )
+
+    # Flags this lead's reply as a high-quality opportunity (e.g. interested
+    # lead, demo request).  Set to True by users or automation after a reply
+    # is reviewed.  Used by the Campaign Analytics opportunities count.
+    is_opportunity = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        comment="True when this lead's reply is flagged as a high-quality opportunity.",
     )
 
     # The same email address must not appear twice in the same campaign.

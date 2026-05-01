@@ -27,6 +27,7 @@ from app.routers import (
     email_accounts,
     engine_ops,
     track,
+    analytics,
 )
 from app.workers.engine_loops import imap_reply_loop, sending_loop, warmup_loop
 
@@ -141,6 +142,13 @@ app.include_router(
 
 # Public tracking links
 app.include_router(track.router, prefix="/track", tags=["Tracking"])
+
+# Analytics dashboard
+app.include_router(
+    analytics.router,
+    prefix="/workspaces/{workspace_id}/analytics",
+    tags=["Analytics"],
+)
 
 
 @app.on_event("startup")
