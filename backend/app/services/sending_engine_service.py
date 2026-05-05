@@ -11,6 +11,7 @@ import smtplib
 import ssl
 import time
 import uuid
+from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from datetime import time as dt_time
 from email.header import decode_header
@@ -33,7 +34,19 @@ from app.models import (
 )
 from app.services.tracking_service import sign_click_target
 
-TRACKING_BASE_URL = os.environ.get("TRACKING_BASE_URL", "http://localhost:8000")
+def _resolved_tracking_base_url() -> str:
+    raw = (os.environ.get("TRACKING_BASE_URL", "http://localhost:8000") or "").strip()
+    if not raw:
+        return "http://localhost:8000"
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+    is_local = host in {"localhost", "127.0.0.1", "::1"}
+    if parsed.scheme == "http" and not is_local:
+        return raw.replace("http://", "https://", 1)
+    return raw
+
+
+TRACKING_BASE_URL = _resolved_tracking_base_url()
 MERGE_TAG_PATTERN = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 # Socket read timeout for IMAP (avoids hung HTTP requests when a server stops responding).
 IMAP_SOCKET_TIMEOUT = int(os.environ.get("IMAP_SOCKET_TIMEOUT", "90"))
