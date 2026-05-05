@@ -121,7 +121,7 @@ export default function MainLayout() {
                       setSelectedOrg("My Organization");
                       setIsOrgMenuOpen(false);
                     }}
-                    className="group flex h-16 w-full items-center px-7 text-base font-medium bg-indigo-50 text-slate-900 transition-all duration-200 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-slate-100 dark:hover:bg-indigo-900/60 rounded-xl m-3 mt-2"
+                    className="group flex h-16 w-full items-center px-7 text-base font-medium bg-indigo-600 text-white transition-all duration-200 hover:bg-indigo-500 rounded-xl m-3 mt-2"
                   >
                     <span className="transition-transform duration-200 group-hover:translate-x-0.5">
                       My Organization

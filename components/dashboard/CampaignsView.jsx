@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
   Loader2,
   Pause,
   Play,
+  Plus,
   Trash2,
   Search,
   X,
@@ -286,7 +288,7 @@ export default function CampaignsView() {
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
             placeholder="Search campaigns…"
-            className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition-colors focus:border-blue-300"
+            className="h-10 w-full rounded-xl border border-slate-200/60 bg-slate-50/50 pl-9 pr-3 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700/50 dark:bg-slate-900 dark:text-slate-300"
           />
         </div>
 
@@ -295,64 +297,81 @@ export default function CampaignsView() {
             <button
               type="button"
               onClick={() => { setIsStatusOpen((p) => !p); setIsSortOpen(false); }}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-all hover:border-slate-300 hover:bg-slate-50"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition-all duration-200 hover:border-indigo-400/50 hover:bg-indigo-50/30 dark:border-slate-700/50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-indigo-900/10"
             >
               <SelectedStatusIcon className={["h-4 w-4", selectedStatus.iconClass].join(" ")} />
               <span>{selectedStatus.label}</span>
-              <ChevronDown className={["h-4 w-4 text-slate-500 transition-transform", isStatusOpen ? "rotate-180" : ""].join(" ")} />
+              <ChevronDown className={["h-4 w-4 text-slate-400 transition-transform duration-200", isStatusOpen ? "rotate-180" : ""].join(" ")} />
             </button>
-            {isStatusOpen && (
-              <div className="absolute right-0 top-11 z-20 w-52 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                {statusOptions.map((option) => {
-                  const Icon = option.icon;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => { setSelectedStatus(option); setIsStatusOpen(false); }}
-                      className={["flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors", selectedStatus.value === option.value ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"].join(" ")}
-                    >
-                      <Icon className={["h-4 w-4", option.iconClass].join(" ")} />
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <AnimatePresence>
+              {isStatusOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -5 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -5 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  className="absolute right-0 top-11 z-20 w-52 rounded-xl border border-slate-200/60 bg-white p-1 shadow-xl shadow-slate-200/60 dark:border-slate-700/50 dark:bg-slate-900 dark:shadow-slate-900/60"
+                >
+                  {statusOptions.map((option) => {
+                    const Icon = option.icon;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => { setSelectedStatus(option); setIsStatusOpen(false); }}
+                        className={["flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-150", selectedStatus.value === option.value ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300" : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"].join(" ")}
+                      >
+                        <Icon className={["h-4 w-4", option.iconClass].join(" ")} />
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="relative" ref={sortRef}>
             <button
               type="button"
               onClick={() => { setIsSortOpen((p) => !p); setIsStatusOpen(false); }}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-all hover:border-slate-300 hover:bg-slate-50"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition-all duration-200 hover:border-indigo-400/50 hover:bg-indigo-50/30 dark:border-slate-700/50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-indigo-900/10"
             >
               <span>{selectedSort.label}</span>
-              <ChevronDown className={["h-4 w-4 text-slate-500 transition-transform", isSortOpen ? "rotate-180" : ""].join(" ")} />
+              <ChevronDown className={["h-4 w-4 text-slate-400 transition-transform duration-200", isSortOpen ? "rotate-180" : ""].join(" ")} />
             </button>
-            {isSortOpen && (
-              <div className="absolute right-0 top-11 z-20 w-44 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
-                {sortOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => { setSelectedSort(option); setIsSortOpen(false); }}
-                    className={["w-full rounded-lg px-2.5 py-2 text-left text-sm transition-colors", selectedSort.value === option.value ? "bg-sky-50 text-sky-700" : "text-slate-700 hover:bg-slate-50"].join(" ")}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            )}
+            <AnimatePresence>
+              {isSortOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -5 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -5 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  className="absolute right-0 top-11 z-20 w-44 rounded-xl border border-slate-200/60 bg-white p-1 shadow-xl shadow-slate-200/60 dark:border-slate-700/50 dark:bg-slate-900 dark:shadow-slate-900/60"
+                >
+                  {sortOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => { setSelectedSort(option); setIsSortOpen(false); }}
+                      className={["w-full rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-150", selectedSort.value === option.value ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300" : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"].join(" ")}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <PermissionGate action="create_campaign">
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
-              className="inline-flex h-10 items-center rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700"
+              className="inline-flex h-10 items-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all duration-200 hover:bg-indigo-500 active:scale-95"
             >
-              + Add New
+              <Plus className="mr-2 h-4 w-4" />
+              Add New
             </button>
           </PermissionGate>
         </div>
@@ -386,15 +405,20 @@ export default function CampaignsView() {
             </div>
           ) : filteredCampaigns.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
-              <Image
-                src="/campaignDood.png"
-                alt="No campaigns"
-                width={500}
-                height={500}
-                className="h-auto w-full max-w-[300px] opacity-60 mix-blend-multiply"
-                priority
-              />
-              <p className="mt-3 text-lg font-semibold text-slate-800">
+              <motion.div
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <Image
+                  src="/campaignDood.png"
+                  alt="No campaigns"
+                  width={500}
+                  height={500}
+                  className="h-auto w-full max-w-[300px] opacity-60 mix-blend-multiply"
+                  priority
+                />
+              </motion.div>
+              <p className="mt-3 text-xl font-bold text-slate-900 dark:text-slate-100">
                 {campaigns.length === 0
                   ? "Add a campaign to start sending emails"
                   : "No campaigns match your filters"}
@@ -404,9 +428,10 @@ export default function CampaignsView() {
                   <button
                     type="button"
                     onClick={() => setShowCreateModal(true)}
-                    className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
+                    className="mt-5 inline-flex items-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all duration-200 hover:bg-indigo-500 active:scale-95"
                   >
-                    + Add New
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add New
                   </button>
                 </PermissionGate>
               )}
