@@ -280,7 +280,7 @@ export default function CampaignsView() {
         />
       )}
 
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 rounded-xl border border-indigo-100/80 bg-gradient-to-r from-slate-50 to-indigo-50/40 p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div className="relative w-full lg:max-w-md">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -297,7 +297,7 @@ export default function CampaignsView() {
             <button
               type="button"
               onClick={() => { setIsStatusOpen((p) => !p); setIsSortOpen(false); }}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition-all duration-200 hover:border-indigo-400/50 hover:bg-indigo-50/30 dark:border-slate-700/50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-indigo-900/10"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-indigo-100 bg-white/70 px-4 py-2 text-sm font-medium text-slate-600 backdrop-blur-sm transition-all duration-200 hover:border-indigo-300 hover:bg-white dark:border-slate-700/50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-indigo-900/10"
             >
               <SelectedStatusIcon className={["h-4 w-4", selectedStatus.iconClass].join(" ")} />
               <span>{selectedStatus.label}</span>
@@ -335,7 +335,7 @@ export default function CampaignsView() {
             <button
               type="button"
               onClick={() => { setIsSortOpen((p) => !p); setIsStatusOpen(false); }}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition-all duration-200 hover:border-indigo-400/50 hover:bg-indigo-50/30 dark:border-slate-700/50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-indigo-900/10"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-indigo-100 bg-white/70 px-4 py-2 text-sm font-medium text-slate-600 backdrop-blur-sm transition-all duration-200 hover:border-indigo-300 hover:bg-white dark:border-slate-700/50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-indigo-900/10"
             >
               <span>{selectedSort.label}</span>
               <ChevronDown className={["h-4 w-4 text-slate-400 transition-transform duration-200", isSortOpen ? "rotate-180" : ""].join(" ")} />

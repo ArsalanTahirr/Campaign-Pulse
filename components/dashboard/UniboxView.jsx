@@ -189,10 +189,22 @@ function Spinner() {
 
 function EmptyState({ label }) {
   return (
-    <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white/70 p-8 text-center">
-      <Inbox className="h-10 w-10 text-slate-300" />
-      <p className="mt-3 text-sm font-medium text-slate-500">{label}</p>
-      <p className="mt-1 text-sm text-slate-400">No conversations here yet.</p>
+    <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-slate-100 bg-white p-8 text-center">
+      <div className="relative mb-5 flex items-center justify-center">
+        <motion.div
+          className="absolute h-16 w-16 rounded-full bg-indigo-50"
+          animate={{ scale: [1, 1.18, 1], opacity: [0.6, 1, 0.6] }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <motion.div
+          animate={{ scale: [1, 1.05, 1] }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <Inbox className="relative h-9 w-9 text-indigo-300" />
+        </motion.div>
+      </div>
+      <p className="text-sm font-semibold text-slate-500">{label}</p>
+      <p className="mt-1 text-sm italic font-medium text-slate-400">No conversations here yet.</p>
     </div>
   );
 }
@@ -766,10 +778,10 @@ export default function UniboxView() {
       <>
         <div className="flex items-center justify-between border-b border-slate-200 pb-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-indigo-600">
               Active View
             </p>
-            <h2 className="text-xl font-semibold text-slate-900">{activeLabel}</h2>
+            <h2 className="text-3xl font-black tracking-tight text-slate-900">{activeLabel}</h2>
           </div>
           <div className="flex items-center gap-2">
             {total > 0 && (
@@ -802,11 +814,11 @@ export default function UniboxView() {
   };
 
   return (
-    <section className="flex flex-1 bg-slate-50/60 p-4 sm:p-6">
+    <section className="flex flex-1 bg-white p-4 sm:p-6">
       <div className="flex w-full flex-col gap-4 lg:flex-row">
 
         {/* ── Sidebar ── */}
-        <aside className="w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:w-[300px] lg:shrink-0">
+        <aside className="w-full rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-md lg:w-[280px] lg:shrink-0">
 
           {/* Search bar */}
           <div className="relative mb-4">
@@ -819,7 +831,7 @@ export default function UniboxView() {
               onFocus={() => setSearchMode(true)}
               onKeyDown={handleSearchKeyDown}
               placeholder="Search messages…"
-              className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-700 outline-none transition-colors focus:border-blue-300 focus:bg-white"
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:bg-slate-800 dark:border-slate-700"
             />
           </div>
 
@@ -828,7 +840,7 @@ export default function UniboxView() {
             <button
               type="button"
               onClick={() => setIsStatusOpen((p) => !p)}
-              className="flex w-full items-center justify-between rounded-xl bg-sky-50 px-3 py-2 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-sky-100"
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs font-bold uppercase tracking-widest text-indigo-600 transition-colors hover:bg-indigo-50/60"
             >
               <span>Status</span>
               <ChevronDown
@@ -852,7 +864,7 @@ export default function UniboxView() {
                       value={statusSearch}
                       onChange={(e) => setStatusSearch(e.target.value)}
                       placeholder="Search status"
-                      className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-blue-300"
+                      className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-600 outline-none transition-all focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
                     />
                   </div>
                   <div className="mt-2 space-y-0.5">
@@ -863,11 +875,21 @@ export default function UniboxView() {
                           key={status.id}
                           type="button"
                           onClick={() => selectFilter("pipeline", status.id)}
-                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${isActive ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"
-                            }`}
+                          className={`relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors ${
+                            isActive ? "text-indigo-700" : "text-slate-600 hover:bg-slate-100/70"
+                          }`}
                         >
-                          <Bolt className={`h-4 w-4 ${status.iconClass}`} />
-                          {status.label}
+                          {isActive && (
+                            <motion.div
+                              layoutId="activeStatusPill"
+                              className="absolute inset-0 rounded-xl bg-indigo-50 border border-indigo-100"
+                              transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                            />
+                          )}
+                          <span className="relative">
+                            <Bolt className={`h-4 w-4 ${status.iconClass}`} />
+                          </span>
+                          <span className="relative font-semibold">{status.label}</span>
                         </button>
                       );
                     })}
@@ -882,7 +904,7 @@ export default function UniboxView() {
             <button
               type="button"
               onClick={() => setIsCampaignsOpen((p) => !p)}
-              className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs font-bold uppercase tracking-widest text-indigo-600 transition-colors hover:bg-indigo-50/60"
             >
               <span>All Campaigns</span>
               <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${isCampaignsOpen ? "rotate-180" : ""}`} />
@@ -904,7 +926,7 @@ export default function UniboxView() {
                       value={campaignSearch}
                       onChange={(e) => setCampaignSearch(e.target.value)}
                       placeholder="Search campaigns"
-                      className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-blue-300"
+                      className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-600 outline-none transition-all focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
                     />
                   </div>
                   <div className="mt-2 space-y-0.5">
@@ -937,7 +959,7 @@ export default function UniboxView() {
             <button
               type="button"
               onClick={() => setIsInboxesOpen((p) => !p)}
-              className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs font-bold uppercase tracking-widest text-indigo-600 transition-colors hover:bg-indigo-50/60"
             >
               <span>All Inboxes</span>
               <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${isInboxesOpen ? "rotate-180" : ""}`} />
@@ -959,7 +981,7 @@ export default function UniboxView() {
                       value={inboxSearch}
                       onChange={(e) => setInboxSearch(e.target.value)}
                       placeholder="Search inboxes"
-                      className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-blue-300"
+                      className="h-9 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-600 outline-none transition-all focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
                     />
                   </div>
                   <div className="mt-2 space-y-0.5">
@@ -997,7 +1019,7 @@ export default function UniboxView() {
             <button
               type="button"
               onClick={() => setIsMoreOpen((p) => !p)}
-              className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs font-bold uppercase tracking-widest text-indigo-600 transition-colors hover:bg-indigo-50/60"
             >
               <span>More</span>
               <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${isMoreOpen ? "rotate-180" : ""}`} />
@@ -1037,13 +1059,13 @@ export default function UniboxView() {
         </aside>
 
         {/* ── Main panel ── */}
-        <div className="flex min-h-[420px] flex-1 flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="flex min-h-[420px] flex-1 flex-col rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
           <AnimatePresence mode="wait">
             <motion.div
               key={searchMode ? "search" : threadDetail ? threadDetail.thread_id : `${activeSelection.type}:${activeSelection.id}`}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
               transition={{ duration: 0.18 }}
               className="flex w-full flex-col"
             >

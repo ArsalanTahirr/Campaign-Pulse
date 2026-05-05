@@ -123,7 +123,6 @@ function SectionCard({ icon: Icon, title, description, children, headerRight = n
           ) : null}
           <div className="min-w-0">
             <h2 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100">{title}</h2>
-            {description ? <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500 dark:text-slate-400 break-words">{description}</p> : null}
           </div>
         </div>
         {headerRight ? <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">{headerRight}</div> : null}
@@ -135,26 +134,31 @@ function SectionCard({ icon: Icon, title, description, children, headerRight = n
 
 function Subsection({ title, description, children }) {
   return (
-    <div className="rounded-xl border border-slate-200/50 bg-white p-4 shadow-sm dark:border-slate-700/50 dark:bg-slate-900/50">
-      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
-      {description ? <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{description}</p> : null}
-      <div className="mt-4 space-y-4">{children}</div>
-    </div>
+    <motion.div
+      className="rounded-2xl border border-slate-100 bg-white/60 p-5 shadow-sm dark:border-slate-700/50 dark:bg-slate-800/40"
+      variants={{
+        hidden: { opacity: 0, y: 12 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] } },
+      }}
+    >
+      <p className="text-[11px] font-bold uppercase tracking-widest text-indigo-600 mb-4 dark:text-indigo-400">{title}</p>
+      <div className="space-y-4">{children}</div>
+    </motion.div>
   );
 }
 
 function LabelField({ label, hint, children }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</label>
+      <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{label}</label>
       {children}
-      {hint ? <p className="text-xs text-slate-400 dark:text-slate-500">{hint}</p> : null}
+      {hint ? <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{hint}</p> : null}
     </div>
   );
 }
 
 const inputClass =
-  "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
+  "h-10 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 text-sm text-slate-800 outline-none placeholder:text-slate-300 transition-all duration-200 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-100 dark:placeholder:text-slate-600 dark:focus:bg-slate-800";
 
 function AccountForm({ value, onChange, saving, onSubmit, onCancel, mode }) {
   function handleProviderChange(nextProviderType) {
@@ -174,7 +178,13 @@ function AccountForm({ value, onChange, saving, onSubmit, onCancel, mode }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-5">
+    <motion.form
+      onSubmit={onSubmit}
+      className="space-y-4"
+      initial="hidden"
+      animate="visible"
+      variants={{ visible: { transition: { staggerChildren: 0.08, delayChildren: 0.1 } } }}
+    >
       <Subsection
         title="Account identity"
         description="The address campaigns send from and how we label this mailbox in the system."
@@ -270,16 +280,27 @@ function AccountForm({ value, onChange, saving, onSubmit, onCancel, mode }) {
         </div>
       </Subsection>
 
-      <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end dark:border-slate-800">
-        <button type="button" onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
+      <motion.div
+        className="flex flex-col-reverse gap-2 border-t border-slate-100/80 pt-5 sm:flex-row sm:justify-end dark:border-slate-800"
+        variants={{ hidden: { opacity: 0 }, visible: { opacity: 1, transition: { delay: 0.35 } } }}
+      >
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 transition-all hover:bg-slate-50 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
           Cancel
         </button>
-        <button type="submit" disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60">
+        <button
+          type="submit"
+          disabled={saving}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition-all duration-200 hover:shadow-indigo-500/40 hover:shadow-xl disabled:opacity-60"
+        >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           {mode === "edit" ? "Save changes" : "Add email account"}
         </button>
-      </div>
-    </form>
+      </motion.div>
+    </motion.form>
   );
 }
 
@@ -303,6 +324,8 @@ export default function EmailAccountsView() {
   const [openActionMenuFor, setOpenActionMenuFor] = useState(null);
   const [campaignDrawer, setCampaignDrawer] = useState(null);
   const engineOpInFlightRef = useRef(false);
+  const [hasMounted, setHasMounted] = useState(false);
+  useEffect(() => { setHasMounted(true); }, []);
 
   const getDraftStorageKey = useCallback(() => {
     const workspaceId = workspace?.workspace_id || "unknown";
@@ -650,9 +673,6 @@ export default function EmailAccountsView() {
         >
           <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-500">Workspace</p>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Email accounts</h1>
-          <p className="max-w-2xl text-base text-slate-600 dark:text-slate-400">
-            Connect inboxes your campaigns send from. Configure limits and warmup, then use the engine tools to process the queue or scan for replies.
-          </p>
         </motion.header>
 
         {/* —— Section 1: Engine —— */}
@@ -1046,49 +1066,51 @@ export default function EmailAccountsView() {
         </SectionCard>
 
         {/* —— Right drawer: Add / Edit account —— */}
-        <div
-          className={[
-            "fixed inset-0 z-[80] transition-opacity duration-300",
-            showForm ? "pointer-events-auto bg-slate-950/25 backdrop-blur-sm" : "pointer-events-none bg-transparent",
-          ].join(" ")}
-          onClick={closeFormDrawer}
-          aria-hidden={!showForm}
-        >
-          <AnimatePresence mode="wait">
+        {hasMounted && (
+          <AnimatePresence initial={false}>
             {showForm && (
+              <>
+                {/* Backdrop */}
+                <motion.div
+                  key="email-account-backdrop"
+                  className="fixed inset-0 z-[80] bg-slate-950/25 backdrop-blur-sm"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  onClick={closeFormDrawer}
+                  aria-hidden="true"
+                />
               <motion.aside
                 key="email-account-drawer"
-                className="fixed right-0 top-0 h-screen w-full max-w-2xl overflow-hidden rounded-l-2xl border-l border-slate-200/80 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900 z-[85]"
-                initial={{ x: "100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "100%" }}
-                transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                className="fixed right-0 top-0 h-screen w-full max-w-2xl overflow-hidden rounded-l-2xl border-l border-indigo-200/60 bg-indigo-100/95 shadow-[0_0_50px_-12px_rgba(99,102,241,0.25)] backdrop-blur-2xl dark:border-slate-800/50 dark:bg-slate-900/90 z-[85]"
+                initial={{ x: "100%", opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: "100%", opacity: 0 }}
+                transition={{ type: "spring", stiffness: 100, damping: 20 }}
                 onClick={(event) => event.stopPropagation()}
                 role="dialog"
                 aria-modal="true"
                 aria-label={formMode === "edit" ? "Edit email account" : "Add email account"}
               >
                 <div className="flex h-full flex-col">
-                  <div className="pointer-events-auto flex items-start justify-between gap-3 border-b border-slate-200/60 px-5 py-4 dark:border-slate-700/60">
-                    <div className="flex min-w-0 gap-3">
-                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        <Gauge className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-50">
-                          {formMode === "edit" ? "Edit email account" : "Add email account"}
-                        </h2>
-                        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                          Fill each block in order. Credentials are stored for sending and reply detection only.
-                        </p>
-                      </div>
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-100/80 px-6 py-5 dark:border-slate-800/60">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">Email Account</p>
+                      <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-slate-50 mt-0.5">
+                        {formMode === "edit" ? "Edit Account" : "Add Account"}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500 font-medium leading-relaxed dark:text-slate-400">
+                        Credentials are stored securely for sending and reply detection only.
+                      </p>
                     </div>
                     <button
                       type="button"
                       onClick={closeFormDrawer}
-                      className="relative z-50 shrink-0 text-sm font-medium text-slate-400 transition-colors hover:text-rose-500 dark:text-slate-500 dark:hover:text-rose-400"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 transition-all duration-200 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-900/20 dark:hover:text-rose-400"
+                      aria-label="Close drawer"
                     >
-                      Close
+                      <X className="h-5 w-5" />
                     </button>
                   </div>
 
@@ -1104,9 +1126,10 @@ export default function EmailAccountsView() {
                   </div>
                 </div>
               </motion.aside>
+              </>
             )}
           </AnimatePresence>
-        </div>
+        )}
 
         {/* Delete confirmation modal */}
         <div
