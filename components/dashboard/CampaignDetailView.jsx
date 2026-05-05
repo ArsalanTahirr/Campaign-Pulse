@@ -174,7 +174,7 @@ const leadStatusBadge = {
   opted_out:      "bg-amber-100 text-amber-700",
 };
 
-function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
+function LeadsTab({ workspaceId, campaignId, campaignStatus, onUploaded, onLeadDeleted }) {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -188,7 +188,10 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
         `${API}/workspaces/${workspaceId}/campaigns/${campaignId}/leads?limit=200`,
         { credentials: "include" }
       );
-      if (res.ok) setLeads(await res.json());
+      if (res.ok) {
+        const rows = await res.json();
+        setLeads(rows);
+      }
     } catch {
       toast.error("Failed to load leads.");
     } finally {
@@ -225,12 +228,18 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
       toast.success(`Removed ${email}`);
       setLeadPendingRemove(null);
       await fetchLeads();
+      await onLeadDeleted?.();
     } catch (err) {
       toast.error(err.message);
     } finally {
       setDeletingLeadId(null);
     }
   }
+
+  const handleUploaded = useCallback(async () => {
+    await fetchLeads();
+    await onUploaded?.();
+  }, [fetchLeads, onUploaded]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -405,7 +414,7 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
         onClose={() => setIsImportModalOpen(false)}
         workspaceId={workspaceId}
         campaignId={campaignId}
-        onUploaded={fetchLeads}
+        onUploaded={handleUploaded}
       />
     </div>
   );
@@ -788,7 +797,12 @@ export default function CampaignDetailView({ campaignId }) {
         `${API}/workspaces/${workspaceId}/campaigns/${campaignId}`,
         { credentials: "include" }
       );
-      if (res.ok) setCampaign(await res.json());
+      if (res.ok) {
+        const payload = await res.json().catch(() => null);
+        if (payload) {
+          setCampaign(payload);
+        }
+      }
     } catch {
       toast.error("Failed to load campaign.");
     } finally {
@@ -1039,7 +1053,13 @@ export default function CampaignDetailView({ campaignId }) {
           <SequenceBuilder workspaceId={workspaceId} campaignId={campaignId} campaignStatus={campaign.status} />
         )}
         {tab === "leads" && workspaceId && (
-          <LeadsTab workspaceId={workspaceId} campaignId={campaignId} campaignStatus={campaign.status} />
+          <LeadsTab
+            workspaceId={workspaceId}
+            campaignId={campaignId}
+            campaignStatus={campaign.status}
+            onUploaded={fetchCampaign}
+            onLeadDeleted={fetchCampaign}
+          />
         )}
         {tab === "runs" && workspaceId && (
           <RunsTab workspaceId={workspaceId} campaignId={campaignId} />

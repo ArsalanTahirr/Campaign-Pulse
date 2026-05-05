@@ -188,7 +188,7 @@ export default function LeadImportModal({
       toast.success(
         `Imported ${session.imported_count} leads (${session.skipped_count} skipped, ${session.error_count} errors).`
       );
-      onUploaded?.();
+      await onUploaded?.();
       handleClose();
     } catch (err) {
       toast.error(err.message);
