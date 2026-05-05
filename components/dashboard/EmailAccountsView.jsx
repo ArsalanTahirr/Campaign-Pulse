@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -286,6 +286,7 @@ export default function EmailAccountsView() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [openActionMenuFor, setOpenActionMenuFor] = useState(null);
   const [campaignDrawer, setCampaignDrawer] = useState(null);
+  const engineOpInFlightRef = useRef(false);
 
   const getDraftStorageKey = useCallback(() => {
     const workspaceId = workspace?.workspace_id || "unknown";
@@ -544,6 +545,8 @@ export default function EmailAccountsView() {
 
   async function runEngineOp(kind) {
     if (!workspace?.workspace_id) return;
+    if (engineOpInFlightRef.current) return;
+    engineOpInFlightRef.current = true;
     setOpLoading(kind);
     const controller = new AbortController();
     const imapScanTimeoutMs = 180000;
@@ -574,9 +577,12 @@ export default function EmailAccountsView() {
       if (kind === "imap") {
         const ing = data.messages_ingested ?? 0;
         const rep = data.replies_detected ?? 0;
-        toast.success(`Inbox: ${ing} new message(s) ingested · ${rep} reply event(s).`);
-        if (data.scan_note) {
-          toast.info(data.scan_note, { duration: 10000 });
+        if (data.scan_note && ing === 0 && rep === 0) {
+          toast.error("No matching replies found in this scan. Check lead email match and IMAP settings.", {
+            duration: 7000,
+          });
+        } else {
+          toast.success(`Inbox scan complete: ${ing} ingested, ${rep} replies detected.`);
         }
       }
       await fetchAccounts();
@@ -587,6 +593,7 @@ export default function EmailAccountsView() {
     } finally {
       if (tid != null) window.clearTimeout(tid);
       setOpLoading("");
+      engineOpInFlightRef.current = false;
     }
   }
 

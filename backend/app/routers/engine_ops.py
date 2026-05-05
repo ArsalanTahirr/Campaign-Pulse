@@ -175,7 +175,6 @@ def run_imap_once(
             'The "Queue" badge is the outbound send queue (leads waiting to be emailed), not IMAP. '
             "If you expected new mail, verify IMAP credentials, that the lead exists with the same address as From, or reset last_imap_uid (see backend/scripts/reset_unibox_imap_test.py)."
         )
-
     return {
         "replies_detected": replies_from_ingest,
         "messages_ingested": ingested,

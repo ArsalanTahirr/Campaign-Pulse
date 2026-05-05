@@ -199,7 +199,9 @@ def _process_inbox(
 
     uid_strings = [u.decode() for u in (data[0] or b"").split()]
     max_fetch = int(getattr(account, "max_imap_fetch", None) or 100)
-    uid_strings = uid_strings[:max_fetch]
+    # Scan the newest UIDs first so fresh replies are detected quickly even when
+    # there is a large unseen backlog.
+    uid_strings = uid_strings[-max_fetch:]
 
     lead_emails = _workspace_lead_emails_lower(account.workspace_id, db)
     fetch_batch = max(1, _ses._IMAP_FETCH_BATCH)
