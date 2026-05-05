@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Loader2,
   Mail,
@@ -16,18 +17,18 @@ import { messageFromApiErrorBody } from "@/utils/apiError";
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
 const roleColors = {
-  Owner:              "bg-violet-100 text-violet-700",
-  Agency:             "bg-blue-100 text-blue-700",
-  "Marketing Manager":"bg-emerald-100 text-emerald-700",
-  "Data Analyst":     "bg-amber-100 text-amber-700",
+  Owner:               "bg-indigo-50 text-indigo-600 border border-indigo-100",
+  Agency:              "bg-indigo-50 text-indigo-600 border border-indigo-100",
+  "Marketing Manager": "bg-indigo-50 text-indigo-600 border border-indigo-100",
+  "Data Analyst":      "bg-indigo-50 text-indigo-600 border border-indigo-100",
 };
 
 const statusBadge = {
-  pending:   "bg-amber-100 text-amber-700",
-  accepted:  "bg-emerald-100 text-emerald-700",
-  declined:  "bg-rose-100 text-rose-700",
-  cancelled: "bg-slate-100 text-slate-500",
-  expired:   "bg-slate-100 text-slate-500",
+  pending:   "bg-amber-50 text-amber-600 border border-amber-100",
+  accepted:  "bg-emerald-50 text-emerald-600 border border-emerald-100",
+  declined:  "bg-rose-50 text-rose-500 border border-rose-100",
+  cancelled: "bg-slate-100 text-slate-500 border border-slate-200",
+  expired:   "bg-slate-100 text-slate-500 border border-slate-200",
 };
 
 // ---------------------------------------------------------------------------
@@ -118,7 +119,7 @@ function InviteModal({ workspaceId, onInvited, onClose }) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="colleague@example.com"
-              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-blue-400"
+              className="h-10 w-full rounded-xl border border-slate-200/60 bg-slate-50/50 px-3 text-sm text-slate-700 outline-none transition-all duration-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
               required
             />
           </div>
@@ -157,7 +158,7 @@ function InviteModal({ workspaceId, onInvited, onClose }) {
             <button
               type="submit"
               disabled={submitting || !email.trim() || !selectedRole}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition-all duration-200 hover:bg-indigo-500 active:scale-95 disabled:opacity-60"
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
               Send Invite
@@ -248,7 +249,7 @@ export default function CollaboratorsView() {
   const pendingInvitations = invitations.filter((i) => i.status === "pending");
 
   return (
-    <section className="flex flex-1 flex-col gap-6 bg-slate-50/60 px-6 py-6 sm:px-8">
+    <section className="flex flex-1 flex-col gap-6 bg-slate-50 px-6 py-6 sm:px-8">
       {showInviteModal && workspace && (
         <InviteModal
           workspaceId={workspace.workspace_id}
@@ -261,79 +262,100 @@ export default function CollaboratorsView() {
         />
       )}
 
+      {/* Page header */}
       <div className="flex items-center justify-between">
-        <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
-          {["members", "invitations"].map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={[
-                "rounded-lg px-4 py-1.5 text-sm font-semibold capitalize transition-colors",
-                tab === t
-                  ? "bg-white text-slate-800 shadow-sm dark:bg-slate-700 dark:text-slate-100"
-                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200",
-              ].join(" ")}
-            >
-              {t}
-              {t === "invitations" && pendingInvitations.length > 0 && (
-                <span className="ml-1.5 rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                  {pendingInvitations.length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
+        <h1 className="text-2xl font-black tracking-tight text-slate-900">Team</h1>
         <PermissionGate action="invite_collaborator">
           <button
             type="button"
             onClick={() => setShowInviteModal(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700"
+            className="inline-flex items-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition-all duration-200 hover:bg-indigo-500 active:scale-95"
           >
-            <UserPlus className="h-4 w-4" />
+            <UserPlus className="mr-2 h-4 w-4" />
             Invite Member
           </button>
         </PermissionGate>
       </div>
 
+      {/* Segmented tab control */}
+      <div className="flex items-center border-b border-slate-200/60">
+        <div className="relative flex gap-1 rounded-2xl border border-slate-200/50 bg-slate-100/50 p-1">
+          {["members", "invitations"].map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className="relative z-10 px-6 py-2 text-sm font-medium capitalize transition-colors"
+            >
+              {tab === t && (
+                <motion.span
+                  layoutId="activeTab"
+                  className="absolute inset-0 rounded-xl bg-white shadow-sm"
+                  transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                />
+              )}
+              <span className={[
+                "relative z-10 font-bold",
+                tab === t ? "text-indigo-600" : "text-slate-500 hover:text-slate-700"
+              ].join(" ")}>
+                {t}
+                {t === "invitations" && pendingInvitations.length > 0 && (
+                  <span className="ml-1.5 rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {pendingInvitations.length}
+                  </span>
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+          <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
         </div>
       ) : tab === "members" ? (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
           {collaborators.length === 0 ? (
             <p className="py-16 text-center text-sm text-slate-500">No members yet.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[1fr_160px_120px_60px] items-center border-b border-slate-100 px-5 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800">
+              <div className="grid grid-cols-[1fr_140px_130px_52px] items-center gap-4 border-b border-slate-100 px-5 py-3 text-[11px] font-bold uppercase tracking-widest text-slate-400">
                 <div>Member</div>
                 <div>Role</div>
                 <div>Status</div>
                 <div />
               </div>
-              {collaborators.map((collab) => {
-                // Backward-compatible: support both legacy `roles[]` and new `role`.
+              {collaborators.map((collab, i) => {
                 const roleName = collab.role?.name || collab.roles?.[0]?.name || "—";
                 return (
-                  <div
+                  <motion.div
                     key={collab.collaborator_id}
-                    className="grid grid-cols-[1fr_160px_120px_60px] items-center border-b border-slate-50 px-5 py-4 last:border-0 dark:border-slate-800"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.22, delay: i * 0.05, ease: "easeOut" }}
+                    className="grid grid-cols-[1fr_140px_130px_52px] items-center gap-4 border-b border-slate-100 px-5 py-4 last:border-0 transition-colors hover:bg-slate-50/80"
                   >
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                        {collab.full_name || "(No name)"}
-                      </p>
-                      <p className="text-xs text-slate-500">{collab.email}</p>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-black text-indigo-600">
+                        {(collab.full_name || collab.email || "?")[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">
+                          {collab.full_name || "(No name)"}
+                        </p>
+                        <p className="text-xs text-slate-500">{collab.email}</p>
+                      </div>
                     </div>
 
-                    <span className={["inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", roleColors[roleName] || "bg-slate-100 text-slate-700"].join(" ")}>
-                      {roleName}
-                    </span>
+                    <div>
+                      <span className={["inline-flex h-6 min-w-[90px] items-center justify-center rounded-lg px-3 text-xs font-bold uppercase", roleColors[roleName] || "bg-indigo-50 text-indigo-600 border border-indigo-100"].join(" ")}>
+                        {roleName}
+                      </span>
+                    </div>
 
                     <div>
-                      <span className={["rounded-full px-2.5 py-1 text-xs font-semibold", statusBadge[collab.invite_status] || "bg-slate-100 text-slate-500"].join(" ")}>
+                      <span className={["inline-flex h-6 min-w-[90px] items-center justify-center rounded-full px-3 text-xs font-bold", statusBadge[collab.invite_status] || "bg-slate-100 text-slate-500 border border-slate-200"].join(" ")}>
                         {collab.invite_status}
                       </span>
                     </div>
@@ -344,44 +366,49 @@ export default function CollaboratorsView() {
                           type="button"
                           disabled={removingId === collab.collaborator_id}
                           onClick={() => removeCollaborator(collab.collaborator_id)}
-                          className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-500 disabled:opacity-40"
+                          className="rounded-lg p-1.5 transition-colors hover:bg-rose-50 disabled:opacity-40"
                           aria-label="Remove collaborator"
                         >
                           {removingId === collab.collaborator_id
-                            ? <Loader2 className="h-4 w-4 animate-spin" />
-                            : <Trash2 className="h-4 w-4" />}
+                            ? <Loader2 className="h-4 w-4 animate-spin text-rose-400" />
+                            : <Trash2 className="h-4 w-4 text-slate-300 hover:text-rose-500 transition-colors" />}
                         </button>
                       </PermissionGate>
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>
           )}
         </div>
       ) : (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
           {invitations.length === 0 ? (
             <p className="py-16 text-center text-sm text-slate-500">No invitations sent yet.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[1fr_120px_140px_80px] items-center border-b border-slate-100 px-5 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800">
+              <div className="grid grid-cols-[1fr_130px_140px_60px] items-center border-b border-slate-100 px-5 py-3 text-[11px] font-bold uppercase tracking-widest text-slate-400">
                 <div>Email</div>
                 <div>Status</div>
                 <div>Expires</div>
                 <div />
               </div>
-              {invitations.map((inv) => (
-                <div
+              {invitations.map((inv, i) => (
+                <motion.div
                   key={inv.invitation_id}
-                  className="grid grid-cols-[1fr_120px_140px_80px] items-center border-b border-slate-50 px-5 py-4 last:border-0 dark:border-slate-800"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.22, delay: i * 0.05, ease: "easeOut" }}
+                  className="grid grid-cols-[1fr_130px_140px_60px] items-center border-b border-slate-100 px-5 py-4 last:border-0 transition-colors hover:bg-slate-50/80"
                 >
-                  <div className="flex items-center gap-2">
-                    <Mail className="h-4 w-4 shrink-0 text-slate-400" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">{inv.invitee_email}</span>
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100">
+                      <Mail className="h-3.5 w-3.5 text-slate-400" />
+                    </div>
+                    <span className="text-sm font-bold text-slate-900">{inv.invitee_email}</span>
                   </div>
                   <div>
-                    <span className={["rounded-full px-2.5 py-1 text-xs font-semibold", statusBadge[inv.status] || "bg-slate-100 text-slate-500"].join(" ")}>
+                    <span className={["rounded-full px-3 py-0.5 text-[10px] font-black", statusBadge[inv.status] || "bg-slate-100 text-slate-500 border border-slate-200"].join(" ")}>
                       {inv.status}
                     </span>
                   </div>
@@ -395,17 +422,17 @@ export default function CollaboratorsView() {
                           type="button"
                           disabled={cancelingId === inv.invitation_id}
                           onClick={() => cancelInvitation(inv.invitation_id)}
-                          className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-500 disabled:opacity-40"
+                          className="rounded-lg p-1.5 transition-colors hover:bg-rose-50 disabled:opacity-40"
                           aria-label="Cancel invitation"
                         >
                           {cancelingId === inv.invitation_id
-                            ? <Loader2 className="h-4 w-4 animate-spin" />
-                            : <X className="h-4 w-4" />}
+                            ? <Loader2 className="h-4 w-4 animate-spin text-rose-400" />
+                            : <X className="h-4 w-4 text-slate-300 hover:text-rose-500 transition-colors" />}
                         </button>
                       </PermissionGate>
                     )}
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           )}
