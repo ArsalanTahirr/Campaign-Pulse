@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import CampaignSenderPool, SenderAccount, WarmupSettings
+from app.models import CampaignSenderPool, EmailEvent, SenderAccount, WarmupSettings
 
 PROVIDER_HOST_DEFAULTS = {
     "google": {"smtp_host": "smtp.gmail.com", "imap_host": "imap.gmail.com", "smtp_port": 587, "imap_port": 993},
@@ -22,6 +22,38 @@ PROVIDER_HOST_DEFAULTS = {
 }
 
 GOOGLE_CONSUMER_DOMAINS = {"gmail.com", "googlemail.com"}
+
+
+def _utc_midnight_today() -> datetime:
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _hydrate_today_send_counts(accounts: list[SenderAccount], db: Session) -> None:
+    """Attach lead_sent_count_today / warmup_sent_count_today from EmailEvent for SenderAccountOut."""
+    if not accounts:
+        return
+    start = _utc_midnight_today()
+    ids = [a.account_id for a in accounts]
+    rows = (
+        db.query(EmailEvent.sender_account_id, EmailEvent.event_scope, func.count())
+        .filter(
+            EmailEvent.sender_account_id.in_(ids),
+            EmailEvent.event_type == "sent",
+            EmailEvent.occurred_at >= start,
+            EmailEvent.event_scope.in_(("lead", "warmup")),
+        )
+        .group_by(EmailEvent.sender_account_id, EmailEvent.event_scope)
+        .all()
+    )
+    by_acc: dict[str, dict[str, int]] = {i: {"lead": 0, "warmup": 0} for i in ids}
+    for sid, scope, cnt in rows:
+        if sid in by_acc and scope in by_acc[sid]:
+            by_acc[sid][scope] = int(cnt)
+    for acc in accounts:
+        bucket = by_acc.get(acc.account_id, {"lead": 0, "warmup": 0})
+        acc.lead_sent_count_today = bucket["lead"]
+        acc.warmup_sent_count_today = bucket["warmup"]
 MICROSOFT_CONSUMER_DOMAINS = {
     "outlook.com",
     "hotmail.com",
@@ -182,13 +214,15 @@ def _get_account_or_404(workspace_id: str, account_id: str, db: Session) -> Send
 
 
 def list_accounts(workspace_id: str, db: Session) -> list[SenderAccount]:
-    return (
+    accounts = (
         db.query(SenderAccount)
         .options(joinedload(SenderAccount.warmup_settings))
         .filter(SenderAccount.workspace_id == workspace_id, SenderAccount.deleted_at.is_(None))
         .order_by(SenderAccount.created_at.desc())
         .all()
     )
+    _hydrate_today_send_counts(accounts, db)
+    return accounts
 
 
 def create_account(workspace_id: str, payload: dict, db: Session) -> SenderAccount:
@@ -232,7 +266,9 @@ def create_account(workspace_id: str, payload: dict, db: Session) -> SenderAccou
             detail=f"Could not create sender account: {exc.orig}",
         )
 
-    return _get_account_or_404(workspace_id, account.account_id, db)
+    created = _get_account_or_404(workspace_id, account.account_id, db)
+    _hydrate_today_send_counts([created], db)
+    return created
 
 
 def update_account(workspace_id: str, account_id: str, updates: dict, db: Session) -> SenderAccount:
@@ -277,7 +313,9 @@ def update_account(workspace_id: str, account_id: str, updates: dict, db: Sessio
     _reconcile_account_status(account)
     db.commit()
     db.refresh(account)
-    return _get_account_or_404(workspace_id, account_id, db)
+    updated = _get_account_or_404(workspace_id, account_id, db)
+    _hydrate_today_send_counts([updated], db)
+    return updated
 
 
 def delete_account(workspace_id: str, account_id: str, db: Session) -> None:

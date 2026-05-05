@@ -38,9 +38,12 @@ def test_open_and_click_tracking_create_events(client, db):
     open_res = client.get(f"/track/open/{sent_event.event_id}")
     assert open_res.status_code == 200
     assert open_res.headers["content-type"].startswith("image/gif")
+    dup_open = client.get(f"/track/open/{sent_event.event_id}")
+    assert dup_open.status_code == 200
     opened = db.query(EmailEvent).filter(EmailEvent.event_type == "opened").all()
     assert len(opened) == 1
     assert opened[0].lead_id == lead.lead_id
+    assert opened[0].event_metadata.get("source_sent_event_id") == str(sent_event.event_id)
 
     target = "https://example.com/offer"
     sig = sign_click_target(sent_event.event_id, target)
@@ -53,6 +56,28 @@ def test_open_and_click_tracking_create_events(client, db):
     clicked = db.query(EmailEvent).filter(EmailEvent.event_type == "clicked").all()
     assert len(clicked) == 1
     assert clicked[0].event_metadata["url"] == target
+    assert clicked[0].event_metadata.get("source_sent_event_id") == str(sent_event.event_id)
+
+
+def test_tracking_rejects_warmup_scope_sent(client, db):
+    """Warmup sends are not trackable; public /track/* must not accept their event ids."""
+    user = make_user(db)
+    ws = make_workspace(db, user)
+    sender = make_sender_account(db, ws.workspace_id, email="warm_a@example.com")
+    recipient = make_sender_account(db, ws.workspace_id, email="warm_b@example.com")
+    warmup_sent = EmailEvent(
+        event_type="sent",
+        event_scope="warmup",
+        sender_account_id=sender.account_id,
+        recipient_account_id=recipient.account_id,
+        warmup_thread_id=str(uuid.uuid4()),
+    )
+    db.add(warmup_sent)
+    db.commit()
+    db.refresh(warmup_sent)
+
+    open_res = client.get(f"/track/open/{warmup_sent.event_id}")
+    assert open_res.status_code == 422
 
 
 def test_click_tracking_rejects_bad_signature(client, db):
@@ -83,7 +108,8 @@ def test_process_claimed_lead_renders_merge_tags_from_custom_variables(db, monke
         db,
         step.step_id,
         subject="Hi {{first_name}} from {{company}}",
-        body="<p>{{first_name}} {{last_name}} - {{job_title}} - {{missing_key}}</p>",
+        body='<p>{{first_name}} {{last_name}} - {{job_title}} - {{missing_key}}</p>'
+        '<p><a href="https://example.com/offer">See offer</a></p>',
     )
     sender = make_sender_account(db, ws.workspace_id, email="sender_merge@example.com")
     attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
@@ -100,7 +126,7 @@ def test_process_claimed_lead_renders_merge_tags_from_custom_variables(db, monke
 
     captured = {}
 
-    def _fake_send_smtp(account, recipient, subject, html_body, plain_body=""):
+    def _fake_send_smtp(account, recipient, subject, html_body, plain_body="", from_display_name=None):
         captured["recipient"] = recipient
         captured["subject"] = subject
         captured["html_body"] = html_body
@@ -115,4 +141,44 @@ def test_process_claimed_lead_renders_merge_tags_from_custom_variables(db, monke
     assert captured["subject"] == "Hi Ava from Acme"
     assert "<p>Ava Stone - Founder - </p>" in captured["html_body"]
     assert "{{" not in captured["html_body"]
+    assert "/track/open/" in captured["html_body"]
+    assert "/track/click/" in captured["html_body"]
+    assert "example.com%2Foffer" in captured["html_body"] or "example.com/offer" in captured["html_body"]
     assert lead.delivery_state == "sent"
+
+
+def test_process_claimed_lead_skips_tracking_when_disabled(db, monkeypatch):
+    user = make_user(db)
+    ws = make_workspace(db, user)
+    campaign = make_campaign(db, ws.workspace_id, name="No Track", status="active", open_tracking_enabled=False)
+    step = make_step(db, campaign.campaign_id, step_number=1)
+    make_step_email(
+        db,
+        step.step_id,
+        subject="Hi",
+        body='<p><a href="https://example.com/x">x</a></p>',
+    )
+    sender = make_sender_account(db, ws.workspace_id, email="sender_notrack@example.com")
+    attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
+
+    lead = make_lead(db, campaign.campaign_id, email="lead_notrack@example.com")
+    lead.delivery_state = "sending"
+    lock_token = str(uuid.uuid4())
+    lead.lock_token = lock_token
+    lead.next_step_id = step.step_id
+    db.commit()
+
+    captured = {}
+
+    def _fake_send_smtp(account, recipient, subject, html_body, plain_body="", from_display_name=None):
+        captured["html_body"] = html_body
+        return "<message-id>"
+
+    monkeypatch.setattr(sending_engine_service, "_send_smtp", _fake_send_smtp)
+
+    sending_engine_service.process_claimed_lead(lead.lead_id, lock_token, db)
+    db.refresh(lead)
+
+    assert "/track/open/" not in captured["html_body"]
+    assert "/track/click/" not in captured["html_body"]
+    assert 'href="https://example.com/x"' in captured["html_body"]

@@ -23,6 +23,7 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  Download,
   Loader2,
   Mail,
   Pause,
@@ -36,6 +37,7 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import PermissionGate from "@/components/ui/PermissionGate";
 import SequenceBuilder from "@/components/dashboard/SequenceBuilder";
+import LeadImportModal from "@/components/dashboard/LeadImportModal";
 import { messageFromApiErrorBody, userMessageFromFetchError } from "@/utils/apiError";
 import {
   buildTimezoneOption,
@@ -45,6 +47,21 @@ import {
 import { isTextInputElement } from "@/utils/keyboard";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+
+/** Headers only — matches common CRM exports; extra columns become merge fields. */
+const LEAD_IMPORT_TEMPLATE_CSV =
+  "email,first_name,last_name,company,title\n" +
+  "jane.doe@example.com,Jane,Doe,Acme Inc.,VP Sales\n";
+
+function downloadLeadImportTemplate() {
+  const blob = new Blob([LEAD_IMPORT_TEMPLATE_CSV], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "campaign-pulse-leads-template.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const statusBadge = {
   draft:     "bg-slate-200 text-slate-700",
@@ -106,21 +123,28 @@ function ExecutionControls({ campaign, workspaceId, onTransitioned }) {
   return (
     <PermissionGate action="start_campaign">
       <div className="flex items-center gap-2">
-        {available.map(({ label, action, icon: Icon, cls }) => (
-          <button
-            key={action}
-            type="button"
-            disabled={!!loading}
-            onClick={() => fire(action)}
-            className={[
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold shadow-sm transition-all disabled:opacity-60",
-              cls,
-            ].join(" ")}
-          >
-            {loading === action ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
-            {label}
-          </button>
-        ))}
+        {available.map(({ label, action, icon: Icon, cls }) => {
+          const needsLeads =
+            (action === "started" || action === "resumed") && (campaign.lead_count ?? 0) < 1;
+          return (
+            <button
+              key={action}
+              type="button"
+              disabled={!!loading || needsLeads}
+              title={
+                needsLeads ? "Add at least one lead (Leads tab or import) before starting or resuming." : undefined
+              }
+              onClick={() => fire(action)}
+              className={[
+                "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold shadow-sm transition-all disabled:opacity-60",
+                cls,
+              ].join(" ")}
+            >
+              {loading === action ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+              {label}
+            </button>
+          );
+        })}
       </div>
     </PermissionGate>
   );
@@ -130,80 +154,32 @@ function ExecutionControls({ campaign, workspaceId, onTransitioned }) {
 // Lead Upload
 // ---------------------------------------------------------------------------
 
-function LeadUploadButton({ workspaceId, campaignId, onUploaded, disabled, disabledReason }) {
-  const inputRef = useRef(null);
-  const [uploading, setUploading] = useState(false);
 
-  async function handleFile(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    const form = new FormData();
-    form.append("file", file);
-    try {
-      const res = await fetch(
-        `${API}/workspaces/${workspaceId}/campaigns/${campaignId}/leads/import`,
-        { method: "POST", credentials: "include", body: form }
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(messageFromApiErrorBody(err, "Upload failed."));
-      }
-      const session = await res.json();
-      toast.success(
-        `Imported ${session.imported_count} leads (${session.skipped_count} skipped, ${session.error_count} errors).`
-      );
-      onUploaded?.();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setUploading(false);
-      event.target.value = "";
-    }
-  }
-
-  return (
-    <PermissionGate action="import_leads">
-      <>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".csv,.xlsx"
-          className="hidden"
-          onChange={handleFile}
-        />
-        <button
-          type="button"
-          disabled={uploading || disabled}
-          onClick={() => inputRef.current?.click()}
-          title={disabled ? disabledReason : ""}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          Import CSV/XLSX
-        </button>
-      </>
-    </PermissionGate>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Leads Tab
 // ---------------------------------------------------------------------------
 
+/** Matches DB `lead_status` (outreach funnel) plus legacy engagement-style keys if ever used. */
 const leadStatusBadge = {
-  pending:   "bg-slate-200 text-slate-700",
-  sent:      "bg-blue-100 text-blue-700",
-  opened:    "bg-sky-100 text-sky-700",
-  clicked:   "bg-violet-100 text-violet-700",
-  replied:   "bg-emerald-100 text-emerald-700",
-  bounced:   "bg-rose-100 text-rose-600",
-  opted_out: "bg-amber-100 text-amber-700",
+  active:         "bg-blue-100 text-blue-800",
+  replied:        "bg-emerald-100 text-emerald-800",
+  unsubscribed:   "bg-amber-100 text-amber-800",
+  bounced:        "bg-rose-100 text-rose-700",
+  completed:      "bg-slate-200 text-slate-700",
+  pending:        "bg-slate-200 text-slate-700",
+  sent:           "bg-blue-100 text-blue-700",
+  opened:         "bg-sky-100 text-sky-700",
+  clicked:        "bg-violet-100 text-violet-700",
+  opted_out:      "bg-amber-100 text-amber-700",
 };
 
-function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
+function LeadsTab({ workspaceId, campaignId, campaignStatus, onUploaded, onLeadDeleted }) {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [leadPendingRemove, setLeadPendingRemove] = useState(null);
+  const [deletingLeadId, setDeletingLeadId] = useState(null);
 
   const fetchLeads = useCallback(async () => {
     setLoading(true);
@@ -212,7 +188,10 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
         `${API}/workspaces/${workspaceId}/campaigns/${campaignId}/leads?limit=200`,
         { credentials: "include" }
       );
-      if (res.ok) setLeads(await res.json());
+      if (res.ok) {
+        const rows = await res.json();
+        setLeads(rows);
+      }
     } catch {
       toast.error("Failed to load leads.");
     } finally {
@@ -222,20 +201,78 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
 
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
+  useEffect(() => {
+    if (!leadPendingRemove) return;
+    function onKey(e) {
+      if (e.key === "Escape") setLeadPendingRemove(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [leadPendingRemove]);
+
   const isLeadMutationLocked = ["completed", "deleted"].includes(campaignStatus);
+  const isLeadDeleteLocked = ["active", "completed", "deleted"].includes(campaignStatus);
+
+  async function confirmRemoveLead() {
+    if (!leadPendingRemove || deletingLeadId) return;
+    const { lead_id, email } = leadPendingRemove;
+    setDeletingLeadId(lead_id);
+    try {
+      const res = await fetch(
+        `${API}/workspaces/${workspaceId}/campaigns/${campaignId}/leads/${lead_id}`,
+        { method: "DELETE", credentials: "include" }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(messageFromApiErrorBody(err, "Could not remove lead."));
+      }
+      toast.success(`Removed ${email}`);
+      setLeadPendingRemove(null);
+      await fetchLeads();
+      await onLeadDeleted?.();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setDeletingLeadId(null);
+    }
+  }
+
+  const handleUploaded = useCallback(async () => {
+    await fetchLeads();
+    await onUploaded?.();
+  }, [fetchLeads, onUploaded]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-        <p className="text-sm text-slate-500">{leads.length} lead{leads.length !== 1 ? "s" : ""}</p>
-        <div className="flex items-center gap-2">
-          <LeadUploadButton
-            workspaceId={workspaceId}
-            campaignId={campaignId}
-            onUploaded={fetchLeads}
-            disabled={isLeadMutationLocked}
-            disabledReason="Completed/deleted campaigns are view-only for lead changes."
-          />
+      <div className="border-b border-slate-200 px-6 py-4 dark:border-slate-700">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-2">
+            <p className="text-sm text-slate-500">
+              {leads.length} lead{leads.length !== 1 ? "s" : ""}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={downloadLeadImportTemplate}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/80"
+            >
+              <Download className="h-4 w-4" />
+              Download Sample CSV
+            </button>
+            <PermissionGate action="import_leads">
+              <button
+                type="button"
+                disabled={isLeadMutationLocked}
+                onClick={() => setIsImportModalOpen(true)}
+                title={isLeadMutationLocked ? "Completed/deleted campaigns are view-only for lead changes." : ""}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Upload className="h-4 w-4" />
+                Import CSV/XLSX
+              </button>
+            </PermissionGate>
+          </div>
         </div>
       </div>
 
@@ -246,23 +283,35 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
           </div>
         ) : leads.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <p className="text-sm text-slate-500">No leads yet. Import a CSV to get started.</p>
+            <p className="text-sm text-slate-500">
+              No leads yet. Download the sample CSV above for column names, then import your file.
+            </p>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full table-fixed border-collapse text-sm">
+            <colgroup>
+              <col className="min-w-0" />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "7.25rem" }} />
+              <col style={{ width: "10.75rem" }} />
+              <col style={{ width: "3.25rem" }} />
+            </colgroup>
             <thead className="sticky top-0 bg-white dark:bg-slate-900">
               <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800">
-                <th className="px-6 py-3 text-left">Email</th>
+                <th className="min-w-0 px-6 py-3 text-left">Email</th>
                 <th className="px-4 py-3 text-left">Name</th>
                 <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Added</th>
+                <th className="whitespace-nowrap px-3 py-3 text-left">Added</th>
+                <th className="px-2 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {leads.map((lead) => (
                 <tr key={lead.lead_id} className="border-b border-slate-50 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50">
-                  <td className="px-6 py-3 font-medium text-slate-700 dark:text-slate-200">{lead.email}</td>
-                  <td className="px-4 py-3 text-slate-600 dark:text-slate-400">
+                  <td className="min-w-0 truncate px-6 py-3 font-medium text-slate-700 dark:text-slate-200" title={lead.email}>
+                    {lead.email}
+                  </td>
+                  <td className="min-w-0 truncate px-4 py-3 text-slate-600 dark:text-slate-400" title={[lead.first_name, lead.last_name].filter(Boolean).join(" ") || undefined}>
                     {[lead.first_name, lead.last_name].filter(Boolean).join(" ") || "—"}
                   </td>
                   <td className="px-4 py-3">
@@ -270,13 +319,106 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus }) {
                       {lead.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-400">—</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-xs text-slate-500 dark:text-slate-400">
+                    {lead.created_at
+                      ? new Date(lead.created_at).toLocaleString(undefined, {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })
+                      : "—"}
+                  </td>
+                  <td className="px-2 py-3 text-right">
+                    <PermissionGate action="manage_leads">
+                      <button
+                        type="button"
+                        disabled={isLeadDeleteLocked || deletingLeadId === lead.lead_id}
+                        title={
+                          isLeadDeleteLocked
+                            ? campaignStatus === "active"
+                              ? "Stop or pause the campaign before deleting leads."
+                              : "View-only campaign — leads cannot be changed."
+                            : "Remove lead from this campaign"
+                        }
+                        aria-label={`Remove lead ${lead.email}`}
+                        onClick={() =>
+                          setLeadPendingRemove({
+                            lead_id: lead.lead_id,
+                            email: lead.email,
+                            label: [lead.first_name, lead.last_name].filter(Boolean).join(" ") || lead.email,
+                          })
+                        }
+                        className="inline-flex items-center justify-center rounded-lg border border-transparent p-2 text-slate-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:border-rose-900/50 dark:hover:bg-rose-950/40 dark:hover:text-rose-400"
+                      >
+                        {deletingLeadId === lead.lead_id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </PermissionGate>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {leadPendingRemove ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-[1px]"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setLeadPendingRemove(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lead-remove-title"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-600 dark:bg-slate-900"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h3 id="lead-remove-title" className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+              Remove lead?
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+              <span className="font-medium text-slate-800 dark:text-slate-200">{leadPendingRemove.label}</span>
+              {" "}
+              <span className="text-slate-500">({leadPendingRemove.email})</span>
+              {" "}
+              will be removed from this campaign. Their mailbox is unchanged — only this campaign stops tracking them.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={!!deletingLeadId}
+                onClick={() => setLeadPendingRemove(null)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!!deletingLeadId}
+                onClick={confirmRemoveLead}
+                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60"
+              >
+                {deletingLeadId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Remove lead
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <LeadImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        workspaceId={workspaceId}
+        campaignId={campaignId}
+        onUploaded={handleUploaded}
+      />
     </div>
   );
 }
@@ -658,7 +800,12 @@ export default function CampaignDetailView({ campaignId }) {
         `${API}/workspaces/${workspaceId}/campaigns/${campaignId}`,
         { credentials: "include" }
       );
-      if (res.ok) setCampaign(await res.json());
+      if (res.ok) {
+        const payload = await res.json().catch(() => null);
+        if (payload) {
+          setCampaign(payload);
+        }
+      }
     } catch {
       toast.error("Failed to load campaign.");
     } finally {
@@ -909,7 +1056,13 @@ export default function CampaignDetailView({ campaignId }) {
           <SequenceBuilder workspaceId={workspaceId} campaignId={campaignId} campaignStatus={campaign.status} />
         )}
         {tab === "leads" && workspaceId && (
-          <LeadsTab workspaceId={workspaceId} campaignId={campaignId} campaignStatus={campaign.status} />
+          <LeadsTab
+            workspaceId={workspaceId}
+            campaignId={campaignId}
+            campaignStatus={campaign.status}
+            onUploaded={fetchCampaign}
+            onLeadDeleted={fetchCampaign}
+          />
         )}
         {tab === "runs" && workspaceId && (
           <RunsTab workspaceId={workspaceId} campaignId={campaignId} />

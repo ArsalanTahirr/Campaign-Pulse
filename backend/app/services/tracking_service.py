@@ -23,6 +23,12 @@ def _resolve_sent_event(event_id: str, db: Session) -> EmailEvent:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tracking event not found.")
     if source.event_type != "sent":
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid tracking source event.")
+    # Warmup traffic is not instrumented and must not create open/click engagement rows.
+    if source.event_scope != "lead":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Tracking is only supported for campaign (lead) sends.",
+        )
     return source
 
 
@@ -33,8 +39,27 @@ def _request_metadata(request: Request) -> dict:
     }
 
 
-def log_open_event(source_event_id: str, request: Request, db: Session) -> EmailEvent:
+def log_open_event(source_event_id: str, request: Request, db: Session) -> EmailEvent | None:
+    """
+    Record a single open per sent event (idempotent on pixel re-fetch / prefetch).
+
+    Returns the new EmailEvent, or None if this sent_id was already counted.
+    """
     source = _resolve_sent_event(source_event_id, db)
+    sent_key = str(source.event_id)
+    existing = (
+        db.query(EmailEvent.event_id)
+        .filter(
+            EmailEvent.event_type == "opened",
+            EmailEvent.event_metadata["source_sent_event_id"].astext == sent_key,
+        )
+        .first()
+    )
+    if existing:
+        return None
+
+    meta = _request_metadata(request)
+    meta["source_sent_event_id"] = sent_key
     evt = EmailEvent(
         lead_id=source.lead_id,
         step_id=source.step_id,
@@ -44,7 +69,7 @@ def log_open_event(source_event_id: str, request: Request, db: Session) -> Email
         recipient_account_id=source.recipient_account_id,
         warmup_thread_id=source.warmup_thread_id,
         occurred_at=datetime.now(timezone.utc),
-        event_metadata=_request_metadata(request),
+        event_metadata=meta,
     )
     db.add(evt)
     db.commit()
@@ -67,6 +92,37 @@ def log_click_event(source_event_id: str, target_url: str, request: Request, db:
     source = _resolve_sent_event(source_event_id, db)
     metadata = _request_metadata(request)
     metadata["url"] = target_url
+    metadata["source_sent_event_id"] = str(source.event_id)
+
+    # If image-pixel open tracking is blocked/unreachable, a real click still
+    # proves the email was opened. Backfill one "opened" event idempotently.
+    sent_key = str(source.event_id)
+    existing_open = (
+        db.query(EmailEvent.event_id)
+        .filter(
+            EmailEvent.event_type == "opened",
+            EmailEvent.event_metadata["source_sent_event_id"].astext == sent_key,
+        )
+        .first()
+    )
+    if not existing_open:
+        open_meta = _request_metadata(request)
+        open_meta["source_sent_event_id"] = sent_key
+        open_meta["via"] = "click_backfill"
+        db.add(
+            EmailEvent(
+                lead_id=source.lead_id,
+                step_id=source.step_id,
+                event_type="opened",
+                event_scope=source.event_scope,
+                sender_account_id=source.sender_account_id,
+                recipient_account_id=source.recipient_account_id,
+                warmup_thread_id=source.warmup_thread_id,
+                occurred_at=datetime.now(timezone.utc),
+                event_metadata=open_meta,
+            )
+        )
+
     evt = EmailEvent(
         lead_id=source.lead_id,
         step_id=source.step_id,

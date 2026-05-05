@@ -30,6 +30,12 @@ export function messageFromApiErrorBody(body, fallback = "Something went wrong."
 export function userMessageFromFetchError(err, fallback = "Request failed.") {
   const name = err?.name;
   const msg = typeof err?.message === "string" ? err.message : "";
+  if (name === "AbortError") {
+    return (
+      "The request took too long and was cancelled. " +
+      "IMAP scans can be slow with many accounts; check the API terminal for errors or try again."
+    );
+  }
   if (
     name === "TypeError" ||
     msg === "Failed to fetch" ||
@@ -45,6 +51,7 @@ export function userMessageFromFetchError(err, fallback = "Request failed.") {
 
 const FIELD_LABELS = {
   send_time: "Send time",
+  send_window_end: "Send window end",
   wait_days: "Wait days",
   step_number: "Step number",
   subject_line: "Subject line",

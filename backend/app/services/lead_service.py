@@ -14,7 +14,7 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Campaign, Lead, LeadImportSession
+from app.models import Campaign, Lead, LeadImportSession, UniboxMessage, UniboxThread
 from app.services import sending_engine_service
 
 
@@ -78,6 +78,16 @@ def create_lead(
     db: Session,
 ) -> Lead:
     _assert_campaign_not_completed_or_deleted(campaign_id, db)
+    same_campaign_existing = (
+        db.query(Lead)
+        .filter(Lead.campaign_id == campaign_id, Lead.email == email)
+        .count()
+    )
+    other_campaign_existing = (
+        db.query(Lead)
+        .filter(Lead.campaign_id != campaign_id, Lead.email == email)
+        .count()
+    )
     try:
         lead = Lead(
             lead_id=str(uuid.uuid4()),
@@ -117,7 +127,28 @@ def update_lead(lead_id: str, campaign_id: str, updates: dict, db: Session) -> L
 
 def delete_lead(lead_id: str, campaign_id: str, db: Session) -> None:
     _assert_campaign_not_completed_or_deleted(campaign_id, db)
+    campaign_status = (
+        db.query(Campaign.status)
+        .filter(Campaign.campaign_id == campaign_id)
+        .scalar()
+    )
+    if campaign_status == "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stop or pause the campaign before deleting leads.",
+        )
     lead = get_lead_or_404(lead_id, campaign_id, db)
+    # Keep Unibox rows consistent before FK ON DELETE SET NULL runs on lead_id.
+    (
+        db.query(UniboxThread)
+        .filter(UniboxThread.lead_id == lead.lead_id, UniboxThread.is_orphan.is_(False))
+        .update({"is_orphan": True, "lead_id": None}, synchronize_session=False)
+    )
+    (
+        db.query(UniboxMessage)
+        .filter(UniboxMessage.lead_id == lead.lead_id, UniboxMessage.is_orphan.is_(False))
+        .update({"is_orphan": True}, synchronize_session=False)
+    )
     db.delete(lead)
     db.commit()
 

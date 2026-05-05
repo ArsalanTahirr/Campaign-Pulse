@@ -12,12 +12,14 @@ Key ORM naming conventions mirrored here:
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from app.auth import create_access_token, hash_password
 from app.models import (
     Campaign,
     CampaignSenderPool,
     Collaborator,
+    EmailEvent,
     Invitation,
     Lead,
     LocalAuth,
@@ -25,6 +27,8 @@ from app.models import (
     SenderAccount,
     SequenceStep,
     StepEmail,
+    UniboxMessage,
+    UniboxThread,
     User,
     Workspace,
 )
@@ -116,13 +120,21 @@ def auth_cookies(user):
     return {"access_token": token}
 
 
-def make_campaign(db, workspace_id, creator_id=None, name="Test Campaign", status="draft"):
+def make_campaign(
+    db,
+    workspace_id,
+    creator_id=None,
+    name="Test Campaign",
+    status="draft",
+    open_tracking_enabled=True,
+):
     campaign = Campaign(
         campaign_id=str(uuid.uuid4()),
         workspace_id=workspace_id,
         created_by=creator_id,
         campaign_name=name,
         status=status,
+        open_tracking_enabled=open_tracking_enabled,
     )
     db.add(campaign)
     db.commit()
@@ -154,12 +166,26 @@ def attach_sender_to_campaign(db, campaign_id, sender_account_id):
     return row
 
 
+_ALL_WEEKDAYS = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]
+
+
 def make_step(db, campaign_id, step_number=1, wait_days=0):
     step = SequenceStep(
         step_id=str(uuid.uuid4()),
         campaign_id=campaign_id,
         step_number=step_number,
         wait_days=wait_days,
+        send_time="00:00",
+        send_window_end="23:59",
+        send_days=_ALL_WEEKDAYS,
     )
     db.add(step)
     db.commit()
@@ -178,17 +204,124 @@ def make_step_email(db, step_id, subject="Subject", body="Body text"):
     return variant
 
 
-def make_lead(db, campaign_id, email=None, lead_status="active"):
+def make_lead(db, campaign_id, email=None, lead_status="active", is_opportunity=False):
     email = email or f"lead_{uuid.uuid4().hex[:8]}@example.com"
     lead = Lead(
         lead_id=str(uuid.uuid4()),
         campaign_id=campaign_id,
         email=email,
         lead_status=lead_status,
+        is_opportunity=is_opportunity,
     )
     db.add(lead)
     db.commit()
     return lead
+
+
+def make_email_event(
+    db,
+    lead_id,
+    event_type,
+    sender_account_id=None,
+    step_id=None,
+    occurred_at=None,
+):
+    """
+    Create and persist a single EmailEvent row for use in analytics tests.
+
+    event_type examples: 'sent', 'opened', 'clicked', 'replied', 'bounced'
+    event_scope is always 'lead' (warmup events are excluded from analytics).
+    occurred_at defaults to now if not provided.
+    """
+    event = EmailEvent(
+        event_id=str(uuid.uuid4()),
+        lead_id=lead_id,
+        step_id=step_id,
+        event_type=event_type,
+        event_scope="lead",
+        sender_account_id=sender_account_id,
+        occurred_at=occurred_at or datetime.now(timezone.utc),
+    )
+    db.add(event)
+    db.commit()
+    return event
+
+
+def make_unibox_thread(
+    db,
+    workspace_id,
+    sender_account,
+    lead=None,
+    campaign=None,
+    subject="Test Thread",
+    is_orphan=None,
+):
+    """Create a UniboxThread with at least one inbound UniboxMessage."""
+    if is_orphan is None:
+        is_orphan = lead is None
+    thread = UniboxThread(
+        workspace_id=workspace_id,
+        lead_id=lead.lead_id if lead else None,
+        campaign_id=campaign.campaign_id if campaign else None,
+        subject=subject,
+        is_orphan=is_orphan,
+    )
+    db.add(thread)
+    db.flush()
+
+    msg = UniboxMessage(
+        thread_id=thread.thread_id,
+        sender_account_id=sender_account.account_id,
+        lead_id=lead.lead_id if lead else None,
+        direction="inbound",
+        message_id_header=f"<{uuid.uuid4()}@test.example.com>",
+        from_address=lead.email if lead else f"unknown_{uuid.uuid4().hex[:6]}@external.com",
+        to_addresses=[sender_account.email],
+        subject=subject,
+        body_text="Hello, this is a test message.",
+        is_read=False,
+        is_orphan=is_orphan,
+        status="received",
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(thread)
+    return thread
+
+
+def make_unibox_message(
+    db,
+    thread,
+    sender_account,
+    lead=None,
+    direction="inbound",
+    subject=None,
+    body_text="Test body",
+    is_read=False,
+    status=None,
+):
+    """Add an additional UniboxMessage to an existing thread."""
+    if status is None:
+        status = "received" if direction == "inbound" else "sent"
+    msg = UniboxMessage(
+        thread_id=thread.thread_id,
+        sender_account_id=sender_account.account_id,
+        lead_id=lead.lead_id if lead else None,
+        direction=direction,
+        message_id_header=f"<{uuid.uuid4()}@test.example.com>",
+        from_address=lead.email if lead else sender_account.email,
+        to_addresses=[sender_account.email],
+        subject=subject or thread.subject,
+        body_text=body_text,
+        is_read=is_read,
+        is_orphan=lead is None,
+        status=status,
+        sent_at=datetime.now(timezone.utc) if direction == "outbound" else None,
+        received_at=datetime.now(timezone.utc) if direction == "inbound" else None,
+    )
+    db.add(msg)
+    db.commit()
+    return msg
 
 
 def make_invitation(db, workspace_id, invited_by, invitee_email, role, status="pending", expired=False):

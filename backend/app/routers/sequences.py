@@ -60,6 +60,7 @@ def create_step(
         step_number=body.step_number,
         wait_days=body.wait_days,
         send_time=body.send_time,
+        send_window_end=body.send_window_end,
         send_days=body.send_days,
         email_variants_data=variants_data,
         db=db,

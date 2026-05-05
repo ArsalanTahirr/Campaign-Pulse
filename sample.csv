@@ -1,0 +1,4 @@
+email,first_name,last_name,company
+test@example.com,Test,User,Test Inc
+alice@example.com,Alice,Smith,Acme Corp
+bob@example.com,Bob,Jones,Global Tech

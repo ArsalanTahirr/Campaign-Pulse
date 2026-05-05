@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -286,6 +286,7 @@ export default function EmailAccountsView() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [openActionMenuFor, setOpenActionMenuFor] = useState(null);
   const [campaignDrawer, setCampaignDrawer] = useState(null);
+  const engineOpInFlightRef = useRef(false);
 
   const getDraftStorageKey = useCallback(() => {
     const workspaceId = workspace?.workspace_id || "unknown";
@@ -544,25 +545,55 @@ export default function EmailAccountsView() {
 
   async function runEngineOp(kind) {
     if (!workspace?.workspace_id) return;
+    if (engineOpInFlightRef.current) return;
+    engineOpInFlightRef.current = true;
     setOpLoading(kind);
+    const controller = new AbortController();
+    const imapScanTimeoutMs = 180000;
+    const tid =
+      kind === "imap" ? window.setTimeout(() => controller.abort(), imapScanTimeoutMs) : null;
     try {
       const endpoint = { send: "run-send-once", warmup: "run-warmup-once", imap: "run-imap-once" }[kind];
       const res = await fetch(`${API}/workspaces/${workspace.workspace_id}/engine/${endpoint}`, {
         method: "POST",
         credentials: "include",
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error("Operation failed.");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(messageFromApiErrorBody(err, "Operation failed."));
+      }
       const data = await res.json();
-      if (kind === "send") toast.success(`Processed ${data.processed} lead(s).`);
+      if (kind === "send") {
+        if (data.processed > 0) {
+          toast.success(`Processed ${data.processed} lead(s).`);
+        } else if (data.hint) {
+          toast.info(data.hint, { duration: 10000 });
+        } else {
+          toast.success(`Processed ${data.processed} lead(s).`);
+        }
+      }
       if (kind === "warmup") toast.success(`Warmup sent ${data.warmup_sent} email(s).`);
-      if (kind === "imap") toast.success(`Detected ${data.replies_detected} reply event(s).`);
+      if (kind === "imap") {
+        const ing = data.messages_ingested ?? 0;
+        const rep = data.replies_detected ?? 0;
+        if (data.scan_note && ing === 0 && rep === 0) {
+          toast.error("No matching replies found in this scan. Check lead email match and IMAP settings.", {
+            duration: 7000,
+          });
+        } else {
+          toast.success(`Inbox scan complete: ${ing} ingested, ${rep} replies detected.`);
+        }
+      }
       await fetchAccounts();
       await fetchCampaigns();
       await fetchEngineStatus();
     } catch (err) {
       toast.error(userMessageFromFetchError(err, "Engine operation failed."));
     } finally {
+      if (tid != null) window.clearTimeout(tid);
       setOpLoading("");
+      engineOpInFlightRef.current = false;
     }
   }
 
@@ -614,8 +645,21 @@ export default function EmailAccountsView() {
                 >
                   {engineStatus.engine_enabled ? "Auto-send on" : "Auto-send off"}
                 </span>
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                  Queue: {engineStatus.queued_leads} waiting
+                <span
+                  title={
+                    typeof engineStatus.queued_ready === "number"
+                      ? `${engineStatus.queued_ready} lead(s) are due to send now (same rules as Run send once). ${engineStatus.queued_leads} total queued in active campaigns (includes scheduled for later). Not your IMAP inbox.`
+                      : "Leads in active campaigns with delivery_state=queued. Not your IMAP inbox or Unibox scan."
+                  }
+                  className="cursor-help rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  Send queue:{" "}
+                  {typeof engineStatus.queued_ready === "number" ? engineStatus.queued_ready : engineStatus.queued_leads}{" "}
+                  due now
+                  {typeof engineStatus.queued_ready === "number" &&
+                  engineStatus.queued_leads > engineStatus.queued_ready
+                    ? ` · ${engineStatus.queued_leads} total queued`
+                    : null}
                 </span>
                 {engineStatus.sending_leads > 0 ? (
                   <span className="rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
@@ -688,6 +732,7 @@ export default function EmailAccountsView() {
               type="button"
               onClick={() => runEngineOp("imap")}
               disabled={opLoading === "imap"}
+              title="Reads each connected sender’s INBOX (not Sent). A reply is recorded when the message From matches a lead email in this workspace. Mail that only exists in Spam or another folder is not scanned."
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
             >
               {opLoading === "imap" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Inbox className="h-4 w-4 text-slate-600" />}
@@ -776,7 +821,8 @@ export default function EmailAccountsView() {
                   {filteredAccounts.map((account) => {
                     const names = campaignNamesByAccountId.get(account.account_id) || [];
                     const warmupOn = Boolean(account.warmup_settings?.is_warmup_active);
-                    const warmupEmails = warmupOn ? Math.min(account.sent_count_today, account.daily_sending_limit) : 0;
+                    const leadSentToday = Number(account.lead_sent_count_today ?? 0);
+                    const warmupSentToday = Number(account.warmup_sent_count_today ?? 0);
                     return (
                       <div key={account.account_id} className="grid grid-cols-[minmax(240px,1.6fr)_140px_140px_130px_80px] items-center px-4 py-4">
                         <div className="min-w-0">
@@ -790,9 +836,9 @@ export default function EmailAccountsView() {
                           </div>
                         </div>
                         <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                          {account.sent_count_today} of {account.daily_sending_limit}
+                          {leadSentToday} of {account.daily_sending_limit}
                         </div>
-                        <div className="text-sm font-medium text-slate-700 dark:text-slate-300">{warmupEmails}</div>
+                        <div className="text-sm font-medium text-slate-700 dark:text-slate-300">{warmupSentToday}</div>
                         <div className="text-xs text-slate-500">
                           {names.length > 0 ? (
                             <button

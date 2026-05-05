@@ -8,6 +8,7 @@ from tests.factories import (
     attach_sender_to_campaign,
     auth_cookies,
     make_campaign,
+    make_lead,
     make_role,
     make_sender_account,
     make_step,
@@ -146,6 +147,7 @@ def test_start_draft_campaign(client, db, owner, ws):
     make_step_email(db, step.step_id)
     sender = make_sender_account(db, ws.workspace_id)
     attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
+    make_lead(db, campaign.campaign_id)
 
     res = client.post(
         f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
@@ -198,6 +200,38 @@ def test_start_campaign_without_sender_pool_fails(client, db, owner, ws):
     )
     assert res.status_code == 422
     assert "sender account" in res.json()["detail"].lower()
+
+
+def test_start_campaign_without_leads_fails(client, db, owner, ws):
+    campaign = make_campaign(db, ws.workspace_id, status="draft")
+    step = make_step(db, campaign.campaign_id)
+    make_step_email(db, step.step_id)
+    sender = make_sender_account(db, ws.workspace_id)
+    attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
+
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
+        json={"action": "started"},
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
+    assert "lead" in res.json()["detail"].lower()
+
+
+def test_resume_campaign_without_leads_fails(client, db, owner, ws):
+    campaign = make_campaign(db, ws.workspace_id, status="paused")
+    step = make_step(db, campaign.campaign_id)
+    make_step_email(db, step.step_id)
+    sender = make_sender_account(db, ws.workspace_id)
+    attach_sender_to_campaign(db, campaign.campaign_id, sender.account_id)
+
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/runs",
+        json={"action": "resumed"},
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
+    assert "lead" in res.json()["detail"].lower()
 
 
 def test_pause_running_campaign(client, db, owner, ws):
