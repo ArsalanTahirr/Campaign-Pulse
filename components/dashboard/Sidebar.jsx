@@ -60,7 +60,7 @@ export default function Sidebar({ user, onLogout, onSettings }) {
     <aside className="h-screen w-24 shrink-0 border-r border-slate-200 bg-white transition-colors duration-300 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex h-full flex-col px-4 py-6">
         <div className="flex justify-center pb-8">
-          <Link href="/dashboard" aria-label="Go to dashboard" className="cursor-pointer">
+          <Link href="/" aria-label="Go to Home" title="Home" className="cursor-pointer">
             <motion.div
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
