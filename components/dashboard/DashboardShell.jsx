@@ -190,15 +190,7 @@ export default function DashboardShell({ children }) {
       <Sidebar user={currentUser} onLogout={handleLogout} onSettings={handleSettings} />
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden transition-colors duration-300">
         <header className="sticky top-0 z-50 flex h-20 items-center justify-between border-b border-slate-200 bg-white/95 px-6 backdrop-blur transition-colors duration-300 sm:px-8 dark:border-slate-800 dark:bg-slate-900/95">
-          <h1
-            className={[
-              spaceGrotesk.className,
-              "text-xl font-semibold tracking-tight text-slate-800 transition-all duration-300 sm:text-2xl dark:text-slate-100",
-              activeTitle === "Email Accounts"
-                ? "cursor-default bg-gradient-to-r from-sky-600 via-blue-600 to-cyan-500 bg-[length:200%_100%] bg-clip-text text-transparent"
-                : "",
-            ].join(" ")}
-          >
+          <h1 className={[spaceGrotesk.className, "cursor-default bg-gradient-to-r from-sky-600 via-blue-600 to-cyan-500 bg-clip-text text-xl font-semibold tracking-tight text-transparent sm:text-2xl"].join(" ")}>
             {activeTitle}
           </h1>
           <div

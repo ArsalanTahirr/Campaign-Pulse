@@ -17,18 +17,18 @@ import { messageFromApiErrorBody } from "@/utils/apiError";
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
 const roleColors = {
-  Owner:               "bg-indigo-50 text-indigo-600 border border-indigo-100",
-  Agency:              "bg-indigo-50 text-indigo-600 border border-indigo-100",
+  Owner: "bg-indigo-50 text-indigo-600 border border-indigo-100",
+  Agency: "bg-indigo-50 text-indigo-600 border border-indigo-100",
   "Marketing Manager": "bg-indigo-50 text-indigo-600 border border-indigo-100",
-  "Data Analyst":      "bg-indigo-50 text-indigo-600 border border-indigo-100",
+  "Data Analyst": "bg-indigo-50 text-indigo-600 border border-indigo-100",
 };
 
 const statusBadge = {
-  pending:   "bg-amber-50 text-amber-600 border border-amber-100",
-  accepted:  "bg-emerald-50 text-emerald-600 border border-emerald-100",
-  declined:  "bg-rose-50 text-rose-500 border border-rose-100",
+  pending: "bg-amber-50 text-amber-600 border border-amber-100",
+  accepted: "bg-emerald-50 text-emerald-600 border border-emerald-100",
+  declined: "bg-rose-50 text-rose-500 border border-rose-100",
   cancelled: "bg-slate-100 text-slate-500 border border-slate-200",
-  expired:   "bg-slate-100 text-slate-500 border border-slate-200",
+  expired: "bg-slate-100 text-slate-500 border border-slate-200",
 };
 
 // ---------------------------------------------------------------------------

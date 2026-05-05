@@ -40,11 +40,11 @@ const sortOptions = [
 ];
 
 const statusBadgeClasses = {
-  active:    "bg-blue-600 text-white",
+  active: "bg-blue-600 text-white",
   completed: "bg-emerald-600 text-white",
-  draft:     "bg-slate-200 text-slate-700",
-  paused:    "bg-amber-500 text-white",
-  error:     "bg-rose-500 text-white",
+  draft: "bg-slate-200 text-slate-700",
+  paused: "bg-amber-500 text-white",
+  error: "bg-rose-500 text-white",
   evergreen: "bg-sky-600 text-white",
 };
 

@@ -56,15 +56,7 @@ export default function MainLayout() {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         <header className="sticky top-0 z-50 flex h-20 items-center justify-between border-b border-slate-200 bg-white/95 px-6 backdrop-blur sm:px-8">
-          <h1
-            className={[
-              spaceGrotesk.className,
-              "text-xl font-semibold tracking-tight text-slate-800 transition-all duration-300 sm:text-2xl",
-              activeView === "email"
-                ? "cursor-default bg-gradient-to-r from-sky-600 via-blue-600 to-cyan-500 bg-[length:200%_100%] bg-clip-text text-transparent"
-                : ""
-            ].join(" ")}
-          >
+          <h1 className={[spaceGrotesk.className, "text-xl font-semibold tracking-tight text-slate-800 sm:text-2xl"].join(" ")}>
             {activeTitle}
           </h1>
           <div

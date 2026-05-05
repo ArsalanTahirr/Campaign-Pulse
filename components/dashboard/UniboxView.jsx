@@ -26,17 +26,17 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 // Static config
 // ---------------------------------------------------------------------------
 const pipelineStatuses = [
-  { id: "lead",              label: "Lead",              iconClass: "text-slate-400"  },
-  { id: "interested",        label: "Interested",        iconClass: "text-emerald-500"},
-  { id: "meeting-booked",    label: "Meeting booked",    iconClass: "text-brand-600"  },
-  { id: "meeting-completed", label: "Meeting completed", iconClass: "text-amber-500"  },
-  { id: "won",               label: "Won",               iconClass: "text-lime-500"   },
+  { id: "lead", label: "Lead", iconClass: "text-slate-400" },
+  { id: "interested", label: "Interested", iconClass: "text-emerald-500" },
+  { id: "meeting-booked", label: "Meeting booked", iconClass: "text-brand-600" },
+  { id: "meeting-completed", label: "Meeting completed", iconClass: "text-amber-500" },
+  { id: "won", label: "Won", iconClass: "text-lime-500" },
 ];
 
 const moreOptions = [
-  { id: "inbox",       label: "All Messages", icon: Inbox   },
-  { id: "unread-only", label: "Unread only",  icon: MailOpen },
-  { id: "sent",        label: "Sent",         icon: Send    },
+  { id: "inbox", label: "All Messages", icon: Inbox },
+  { id: "unread-only", label: "Unread only", icon: MailOpen },
+  { id: "sent", label: "Sent", icon: Send },
 ];
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ const moreOptions = [
 function timeAgo(isoString) {
   if (!isoString) return "";
   const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
-  if (diff < 60)   return "Just now";
+  if (diff < 60) return "Just now";
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
@@ -199,11 +199,11 @@ function EmptyState({ label }) {
 
 function PipelineBadge({ status }) {
   const map = {
-    "lead":              { label: "Lead",              cls: "bg-slate-100 text-slate-500"   },
-    "interested":        { label: "Interested",        cls: "bg-emerald-50 text-emerald-600" },
-    "meeting-booked":    { label: "Meeting booked",    cls: "bg-sky-50 text-sky-600"         },
-    "meeting-completed": { label: "Meeting completed", cls: "bg-amber-50 text-amber-600"     },
-    "won":               { label: "Won",               cls: "bg-lime-50 text-lime-700"       },
+    "lead": { label: "Lead", cls: "bg-slate-100 text-slate-500" },
+    "interested": { label: "Interested", cls: "bg-emerald-50 text-emerald-600" },
+    "meeting-booked": { label: "Meeting booked", cls: "bg-sky-50 text-sky-600" },
+    "meeting-completed": { label: "Meeting completed", cls: "bg-amber-50 text-amber-600" },
+    "won": { label: "Won", cls: "bg-lime-50 text-lime-700" },
   };
   const { label, cls } = map[status] || { label: status, cls: "bg-slate-100 text-slate-500" };
   return (
@@ -274,11 +274,11 @@ function ThreadDetail({
 }) {
   const colorByDirection = {
     outbound: "bg-blue-50 border-blue-100",
-    inbound:  "bg-white border-slate-200",
+    inbound: "bg-white border-slate-200",
   };
   const alignByDirection = {
     outbound: "items-end",
-    inbound:  "items-start",
+    inbound: "items-start",
   };
 
   const messagesEndRef = useRef(null);
@@ -286,11 +286,11 @@ function ThreadDetail({
   const [readTogglingId, setReadTogglingId] = useState(null);
 
   // Reply state
-  const [replyBody,    setReplyBody]    = useState("");
+  const [replyBody, setReplyBody] = useState("");
   const [fromAccountId, setFromAccountId] = useState(inboxes[0]?.inbox_id || "");
-  const [isSending,    setIsSending]    = useState(false);
-  const [replyError,   setReplyError]   = useState("");
-  const [replySent,    setReplySent]    = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [replyError, setReplyError] = useState("");
+  const [replySent, setReplySent] = useState(false);
 
   const readBusy = readTogglingId !== null;
 
@@ -338,8 +338,8 @@ function ThreadDetail({
 
   const handleSend = async () => {
     if (!replyBody.trim()) { setReplyError("Reply body cannot be empty."); return; }
-    if (!fromAccountId)    { setReplyError("Please select a sender inbox."); return; }
-    if (!workspaceId)      { setReplyError("No workspace selected."); return; }
+    if (!fromAccountId) { setReplyError("Please select a sender inbox."); return; }
+    if (!workspaceId) { setReplyError("No workspace selected."); return; }
     setIsSending(true);
     setReplyError("");
     setReplySent(false);
@@ -563,34 +563,34 @@ export default function UniboxView() {
 
   // Sidebar data
   const [campaigns, setCampaigns] = useState([]);
-  const [inboxes, setInboxes]     = useState([]);
+  const [inboxes, setInboxes] = useState([]);
 
   // Thread list
-  const [threads,  setThreads]  = useState([]);
-  const [total,    setTotal]    = useState(0);
-  const [loading,  setLoading]  = useState(false);
+  const [threads, setThreads] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
 
   // Thread detail
-  const [threadDetail,  setThreadDetail]  = useState(null);
+  const [threadDetail, setThreadDetail] = useState(null);
   const [threadLoading, setThreadLoading] = useState(false);
 
   // Search
-  const [searchQuery,   setSearchQuery]   = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
-  const [searchTotal,   setSearchTotal]   = useState(0);
-  const [isSearching,   setIsSearching]   = useState(false);
-  const [searchMode,    setSearchMode]    = useState(false);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchMode, setSearchMode] = useState(false);
   const searchRef = useRef(null);
 
   // Filter state
   const [activeSelection, setActiveSelection] = useState({ type: "pipeline", id: "lead" });
-  const [isStatusOpen,    setIsStatusOpen]    = useState(true);
+  const [isStatusOpen, setIsStatusOpen] = useState(true);
   const [isCampaignsOpen, setIsCampaignsOpen] = useState(false);
-  const [isInboxesOpen,   setIsInboxesOpen]   = useState(false);
-  const [isMoreOpen,      setIsMoreOpen]      = useState(false);
-  const [statusSearch,    setStatusSearch]    = useState("");
-  const [campaignSearch,  setCampaignSearch]  = useState("");
-  const [inboxSearch,     setInboxSearch]     = useState("");
+  const [isInboxesOpen, setIsInboxesOpen] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const [statusSearch, setStatusSearch] = useState("");
+  const [campaignSearch, setCampaignSearch] = useState("");
+  const [inboxSearch, setInboxSearch] = useState("");
 
   // ── Load campaigns + inboxes ──────────────────────────────────────────────
   useEffect(() => {
@@ -599,12 +599,12 @@ export default function UniboxView() {
     fetch(`${API}/workspaces/${workspaceId}/campaigns`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setCampaigns(Array.isArray(data) ? data : []))
-      .catch(() => {});
+      .catch(() => { });
 
     fetch(`${API}/workspaces/${workspaceId}/unibox/inboxes`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : { items: [] }))
       .then((d) => setInboxes(d.items || []))
-      .catch(() => {});
+      .catch(() => { });
   }, [workspaceId]);
 
   // ── Build thread query URL ────────────────────────────────────────────────
@@ -619,7 +619,7 @@ export default function UniboxView() {
       p.set("inbox_id", activeSelection.id);
     } else if (activeSelection.type === "more") {
       if (activeSelection.id === "unread-only") p.set("view", "unread");
-      else if (activeSelection.id === "sent")   p.set("view", "sent");
+      else if (activeSelection.id === "sent") p.set("view", "sent");
       else p.set("view", "all");
     }
     return `${API}/workspaces/${workspaceId}/unibox/threads?${p}`;
@@ -649,7 +649,7 @@ export default function UniboxView() {
           { credentials: "include" }
         );
         if (r.ok) setThreadDetail(await r.json());
-      } catch {}
+      } catch { }
       setThreadLoading(false);
     },
     [workspaceId]
@@ -670,7 +670,7 @@ export default function UniboxView() {
         setSearchResults(d.items || []);
         setSearchTotal(d.total || 0);
       }
-    } catch {}
+    } catch { }
     setIsSearching(false);
   }, [workspaceId, searchQuery]);
 
@@ -680,7 +680,7 @@ export default function UniboxView() {
   };
 
   // ── Filter helpers ────────────────────────────────────────────────────────
-  const filteredStatuses  = useMemo(() => {
+  const filteredStatuses = useMemo(() => {
     const q = statusSearch.trim().toLowerCase();
     return q ? pipelineStatuses.filter((s) => s.label.toLowerCase().includes(q)) : pipelineStatuses;
   }, [statusSearch]);
@@ -863,9 +863,8 @@ export default function UniboxView() {
                           key={status.id}
                           type="button"
                           onClick={() => selectFilter("pipeline", status.id)}
-                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
-                            isActive ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"
-                          }`}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${isActive ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"
+                            }`}
                         >
                           <Bolt className={`h-4 w-4 ${status.iconClass}`} />
                           {status.label}
@@ -917,9 +916,8 @@ export default function UniboxView() {
                             key={c.campaign_id}
                             type="button"
                             onClick={() => selectFilter("campaign", c.campaign_id)}
-                            className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                              isActive ? "bg-blue-50 text-blue-600" : "text-slate-700 hover:bg-slate-50"
-                            }`}
+                            className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors ${isActive ? "bg-blue-50 text-blue-600" : "text-slate-700 hover:bg-slate-50"
+                              }`}
                           >
                             <span className="truncate">{campaignListLabel(c)}</span>
                           </button>
@@ -973,9 +971,8 @@ export default function UniboxView() {
                             key={inbox.inbox_id}
                             type="button"
                             onClick={() => selectFilter("inbox", inbox.inbox_id)}
-                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                              isActive ? "bg-blue-50 text-blue-600" : "text-slate-700 hover:bg-slate-50"
-                            }`}
+                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${isActive ? "bg-blue-50 text-blue-600" : "text-slate-700 hover:bg-slate-50"
+                              }`}
                           >
                             <span className="truncate">{inbox.email}</span>
                             {inbox.unread_count > 0 && (
@@ -1024,9 +1021,8 @@ export default function UniboxView() {
                           key={opt.id}
                           type="button"
                           onClick={() => selectFilter("more", opt.id)}
-                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
-                            isActive ? "bg-blue-50 text-blue-600" : "text-slate-700 hover:bg-slate-50"
-                          }`}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${isActive ? "bg-blue-50 text-blue-600" : "text-slate-700 hover:bg-slate-50"
+                            }`}
                         >
                           <Icon className="h-4 w-4" />
                           {opt.label}

@@ -135,9 +135,9 @@ function buildGraphQuery(filterCampaignId, dateRangePreset, customFromYmd, custo
 // Exactly 4 series as required.
 const seriesMeta = [
   { key: "total_sent", label: "Total Emails Sent", tone: "text-amber-500" },
-  { key: "open_rate",  label: "Open Rate (%)",     tone: "text-sky-500"   },
-  { key: "click_rate", label: "Click Rate (%)",    tone: "text-emerald-500"},
-  { key: "reply_rate", label: "Reply Rate (%)",    tone: "text-fuchsia-600"},
+  { key: "open_rate", label: "Open Rate (%)", tone: "text-sky-500" },
+  { key: "click_rate", label: "Click Rate (%)", tone: "text-emerald-500" },
+  { key: "reply_rate", label: "Reply Rate (%)", tone: "text-fuchsia-600" },
 ];
 
 const metricByKey = seriesMeta.reduce((acc, item) => {
@@ -212,38 +212,38 @@ function AnalyticsChartCard({ chartData, emptyHint }) {
           {emptyHint}
         </div>
       ) : (
-      <div className="h-[300px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 16, right: 40, left: -20, bottom: 8 }}>
-            <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "rgb(203 213 225)" }} tick={{ fill: "rgb(100 116 139)", fontSize: 11 }} />
-            <YAxis
-              yAxisId="left"
-              allowDecimals={false}
-              tickLine={false}
-              axisLine={false}
-              tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
-            />
-            <YAxis
-              yAxisId="right"
-              orientation="right"
-              tickLine={false}
-              axisLine={false}
-              tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
-              tickFormatter={(v) => `${v}%`}
-            />
-            <Tooltip
-              content={<AnalyticsTooltip />}
-              cursor={{ stroke: "rgb(148 163 184)", strokeDasharray: "4 4" }}
-            />
+        <div className="h-[300px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 16, right: 40, left: -20, bottom: 8 }}>
+              <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "rgb(203 213 225)" }} tick={{ fill: "rgb(100 116 139)", fontSize: 11 }} />
+              <YAxis
+                yAxisId="left"
+                allowDecimals={false}
+                tickLine={false}
+                axisLine={false}
+                tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
+              />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                tickLine={false}
+                axisLine={false}
+                tick={{ fill: "rgb(148 163 184)", fontSize: 11 }}
+                tickFormatter={(v) => `${v}%`}
+              />
+              <Tooltip
+                content={<AnalyticsTooltip />}
+                cursor={{ stroke: "rgb(148 163 184)", strokeDasharray: "4 4" }}
+              />
 
-            <Area yAxisId="left" type="monotone" dataKey="total_sent" fill="rgb(245 158 11 / 0.12)" stroke="none" isAnimationActive />
-            <Line yAxisId="left"  type="monotone" dataKey="total_sent"  stroke="#f59e0b" strokeWidth={2} dot={false} isAnimationActive />
-            <Line yAxisId="right" type="monotone" dataKey="open_rate"   stroke="#0ea5e9" strokeWidth={2} dot={false} isAnimationActive />
-            <Line yAxisId="right" type="monotone" dataKey="click_rate"  stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive />
-            <Line yAxisId="right" type="monotone" dataKey="reply_rate"  stroke="#c026d3" strokeWidth={2} dot={false} isAnimationActive />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
+              <Area yAxisId="left" type="monotone" dataKey="total_sent" fill="rgb(245 158 11 / 0.12)" stroke="none" isAnimationActive />
+              <Line yAxisId="left" type="monotone" dataKey="total_sent" stroke="#f59e0b" strokeWidth={2} dot={false} isAnimationActive />
+              <Line yAxisId="right" type="monotone" dataKey="open_rate" stroke="#0ea5e9" strokeWidth={2} dot={false} isAnimationActive />
+              <Line yAxisId="right" type="monotone" dataKey="click_rate" stroke="#10b981" strokeWidth={2} dot={false} isAnimationActive />
+              <Line yAxisId="right" type="monotone" dataKey="reply_rate" stroke="#c026d3" strokeWidth={2} dot={false} isAnimationActive />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
       )}
     </div>
   );
@@ -821,8 +821,8 @@ export default function AnalyticsView() {
                 className={[
                   "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
                   rangeMenuOpen ||
-                  dateRangePreset !== "all" ||
-                  (dateRangePreset === "custom" && customFromYmd && customToYmd)
+                    dateRangePreset !== "all" ||
+                    (dateRangePreset === "custom" && customFromYmd && customToYmd)
                     ? "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/50 dark:text-blue-200"
                     : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800",
                 ].join(" ")}
@@ -870,10 +870,10 @@ export default function AnalyticsView() {
                         className={[
                           "flex w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800",
                           dateRangePreset === p.id ||
-                          (p.id === "custom" &&
-                            dateRangePreset === "custom" &&
-                            customFromYmd &&
-                            customToYmd)
+                            (p.id === "custom" &&
+                              dateRangePreset === "custom" &&
+                              customFromYmd &&
+                              customToYmd)
                             ? "font-semibold text-slate-900 dark:text-slate-100"
                             : "text-slate-700 dark:text-slate-300",
                         ].join(" ")}
