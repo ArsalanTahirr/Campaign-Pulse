@@ -385,7 +385,26 @@ def _effective_daily_limit(account: SenderAccount) -> int:
     return max(1, min(account.daily_sending_limit, warm_cap))
 
 
-def select_next_sender_account(campaign_id: str, db: Session) -> SenderAccount | None:
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _sender_jitter_bounds_seconds() -> tuple[int, int]:
+    lo = int(os.environ.get("SENDER_READY_JITTER_MIN_SECONDS", "120"))
+    hi = int(os.environ.get("SENDER_READY_JITTER_MAX_SECONDS", "300"))
+    if lo < 0:
+        lo = 0
+    if hi < lo:
+        hi = lo
+    return lo, hi
+
+
+def _next_sender_ready_at(now_utc: datetime) -> datetime:
+    lo, hi = _sender_jitter_bounds_seconds()
+    return now_utc + timedelta(seconds=random.randint(lo, hi))
+
+
+def select_next_sender_account(campaign_id: str, db: Session) -> tuple[SenderAccount | None, datetime | None]:
     rows = (
         db.query(SenderAccount)
         .join(CampaignSenderPool, CampaignSenderPool.sender_account_id == SenderAccount.account_id)
@@ -400,10 +419,31 @@ def select_next_sender_account(campaign_id: str, db: Session) -> SenderAccount |
         .order_by(SenderAccount.last_used_at.asc().nullsfirst(), SenderAccount.account_id.asc())
         .all()
     )
+    now = datetime.now(timezone.utc)
+    earliest_next_available_at: datetime | None = None
+    skipped_warmup = 0
+    skipped_delay = 0
+    skipped_daily_limit = 0
     for account in rows:
+        # Warmup-active accounts are reserved for warmup traffic, not campaign sends.
+        warmup_active = bool(
+            account.warmup_settings and getattr(account.warmup_settings, "is_warmup_active", False)
+        )
+        if warmup_active:
+            skipped_warmup += 1
+            continue
+        min_delay_seconds = max(int(account.min_delay_seconds or 0), 0)
+        if account.last_used_at is not None:
+            next_allowed_at = account.last_used_at + timedelta(seconds=min_delay_seconds)
+            if now < next_allowed_at:
+                skipped_delay += 1
+                if earliest_next_available_at is None or next_allowed_at < earliest_next_available_at:
+                    earliest_next_available_at = next_allowed_at
+                continue
         if account.sent_count_today < _effective_daily_limit(account):
-            return account
-    return None
+            return account, now
+        skipped_daily_limit += 1
+    return None, earliest_next_available_at
 
 
 def _hhmm_to_time(hhmm: str) -> dt_time:
@@ -499,6 +539,31 @@ def _pick_step_variant(step_id: str, db: Session) -> StepEmail | None:
     )
 
 
+def _pick_step_variant_for_lead(step_id: str, lead_id: str, db: Session) -> tuple[StepEmail | None, int, int]:
+    variants = (
+        db.query(StepEmail)
+        .filter(StepEmail.step_id == step_id)
+        .order_by(StepEmail.created_at.asc())
+        .all()
+    )
+    total = len(variants)
+    if total == 0:
+        return None, 0, 0
+    sent_count = (
+        db.query(func.count(EmailEvent.event_id))
+        .filter(
+            EmailEvent.lead_id == lead_id,
+            EmailEvent.step_id == step_id,
+            EmailEvent.event_scope == "lead",
+            EmailEvent.event_type == "sent",
+        )
+        .scalar()
+        or 0
+    )
+    idx = int(sent_count) % total
+    return variants[idx], idx, total
+
+
 def _build_merge_context(lead: Lead) -> dict[str, str]:
     context: dict[str, str] = {
         "email": str(lead.email or ""),
@@ -537,6 +602,10 @@ _HREF_HTTP_RE = re.compile(
     r'(?P<prefix>\bhref\s*=\s*)(?P<q>["\'])(?P<url>https?://[^"\']+)(?P=q)',
     re.IGNORECASE,
 )
+_BARE_HTTP_RE = re.compile(
+    r'(?<!["\'=])(https?://[^\s<>"\']+)',
+    re.IGNORECASE,
+)
 
 
 def _rewrite_html_links_for_click_tracking(html: str, sent_event_id: str) -> str:
@@ -559,7 +628,19 @@ def _rewrite_html_links_for_click_tracking(html: str, sent_event_id: str) -> str
         tracked = build_tracked_click_url(sent_event_id, url)
         return f'{m.group("prefix")}{q}{tracked}{q}'
 
-    return _HREF_HTTP_RE.sub(repl, html)
+    rewritten = _HREF_HTTP_RE.sub(repl, html)
+    # Some templates are stored as bare URLs (no anchor tag). Wrap those so
+    # email-client auto-linking still goes through tracking.
+    def repl_bare(m: re.Match[str]) -> str:
+        url = m.group(1)
+        low = url.lower()
+        if "/track/click/" in low or "/track/open/" in low:
+            return url
+        tracked = build_tracked_click_url(sent_event_id, url)
+        return f'<a href="{tracked}">{url}</a>'
+
+    rewritten = _BARE_HTTP_RE.sub(repl_bare, rewritten)
+    return rewritten
 
 
 def build_tracked_click_url(sent_event_id: str, target_url: str) -> str:
@@ -622,7 +703,7 @@ def claim_queued_leads(
     db: Session,
     *,
     workspace_id: str | None = None,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, str]]:
     """
     Claim due queued leads for sending.
 
@@ -630,33 +711,87 @@ def claim_queued_leads(
     is considered. When omitted (background ``sending_loop``), any workspace may
     be claimed.
     """
-    now = datetime.now(timezone.utc)
-    q = (
+    now = _utcnow()
+    sender_q = (
+        db.query(SenderAccount)
+        .join(CampaignSenderPool, CampaignSenderPool.sender_account_id == SenderAccount.account_id)
+        .join(Campaign, Campaign.campaign_id == CampaignSenderPool.campaign_id)
+        .filter(
+            Campaign.status == "active",
+            SenderAccount.status.in_(("active", "warming_up")),
+            SenderAccount.deleted_at.is_(None),
+            SenderAccount.is_verified.is_(True),
+            func.coalesce(SenderAccount.next_ready_at, now) <= now,
+        )
+    )
+    if workspace_id is not None:
+        sender_q = sender_q.filter(Campaign.workspace_id == workspace_id)
+    sender_rows = (
+        sender_q.order_by(
+            SenderAccount.next_ready_at.asc().nullsfirst(),
+            SenderAccount.last_used_at.asc().nullsfirst(),
+            SenderAccount.account_id.asc(),
+        )
+        .with_for_update(skip_locked=True)
+        .limit(batch_size)
+        .all()
+    )
+    ready_senders: list[SenderAccount] = []
+    for account in sender_rows:
+        warmup_active = bool(
+            account.warmup_settings and getattr(account.warmup_settings, "is_warmup_active", False)
+        )
+        if warmup_active:
+            continue
+        if int(account.sent_count_today or 0) >= _effective_daily_limit(account):
+            continue
+        ready_senders.append(account)
+    if not ready_senders:
+        db.commit()
+        return []
+
+    last_sent_at_subq = (
+        db.query(func.max(EmailEvent.occurred_at))
+        .filter(
+            EmailEvent.event_scope == "lead",
+            EmailEvent.event_type == "sent",
+            EmailEvent.lead_id == Lead.lead_id,
+        )
+        .correlate(Lead)
+        .scalar_subquery()
+    )
+    lead_q = (
         db.query(Lead)
         .join(Campaign, Campaign.campaign_id == Lead.campaign_id)
         .filter(
             Campaign.status == "active",
             Lead.lead_status == "active",
             Lead.delivery_state == "queued",
-            Lead.next_scheduled_at.isnot(None),
-            Lead.next_scheduled_at <= now,
+            Lead.next_eligible_at.isnot(None),
+            Lead.next_eligible_at <= now,
         )
     )
     if workspace_id is not None:
-        q = q.filter(Campaign.workspace_id == workspace_id)
+        lead_q = lead_q.filter(Campaign.workspace_id == workspace_id)
     leads = (
-        q.order_by(Lead.next_scheduled_at.asc())
+        lead_q.order_by(
+            Lead.next_eligible_at.asc(),
+            last_sent_at_subq.asc().nullsfirst(),
+            Lead.campaign_id.asc(),
+            Lead.lead_id.asc(),
+        )
         .with_for_update(skip_locked=True)
-        .limit(batch_size)
+        .limit(len(ready_senders))
         .all()
     )
-    claims: list[tuple[str, str]] = []
-    for lead in leads:
+
+    claims: list[tuple[str, str, str]] = []
+    for sender, lead in zip(ready_senders, leads):
         token = str(uuid.uuid4())
         lead.delivery_state = "sending"
         lead.lock_token = token
         lead.locked_at = now
-        claims.append((lead.lead_id, token))
+        claims.append((lead.lead_id, token, sender.account_id))
     db.commit()
     return claims
 
@@ -693,19 +828,19 @@ def initialize_lead_schedule(lead: Lead, db: Session) -> None:
     )
     if not first_step:
         lead.next_step_id = None
-        lead.next_scheduled_at = None
+        lead.next_eligible_at = None
         return
     campaign = db.query(Campaign).filter(Campaign.campaign_id == lead.campaign_id).first()
     lead.next_step_id = first_step.step_id
-    lead.next_scheduled_at = _next_step_schedule_utc(
+    lead.next_eligible_at = _next_step_schedule_utc(
         campaign=campaign,
         step=first_step,
-        base_utc=datetime.now(timezone.utc),
+        base_utc=_utcnow(),
     )
 
 
-def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
-    now = datetime.now(timezone.utc)
+def process_claimed_lead(lead_id: str, lock_token: str, sender_id: str, db: Session) -> None:
+    now = _utcnow()
     lead = (
         db.query(Lead)
         .options(joinedload(Lead.campaign))
@@ -721,11 +856,11 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
 
     current_step = _resolve_current_step(lead, db)
     if not current_step:
-        lead.delivery_state = "sent"
+        lead.delivery_state = "completed"
         lead.lock_token = None
         lead.locked_at = None
         lead.next_step_id = None
-        lead.next_scheduled_at = None
+        lead.next_eligible_at = None
         db.commit()
         return
 
@@ -733,11 +868,11 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
         lead.delivery_state = "queued"
         lead.lock_token = None
         lead.locked_at = None
-        lead.next_scheduled_at = _next_step_schedule_utc(lead.campaign, current_step, now)
+        lead.next_eligible_at = _next_step_schedule_utc(lead.campaign, current_step, now)
         db.commit()
         return
 
-    variant = _pick_step_variant(current_step.step_id, db)
+    variant, variant_idx, variant_total = _pick_step_variant_for_lead(current_step.step_id, lead.lead_id, db)
     if not variant:
         lead.delivery_state = "failed"
         lead.lock_token = None
@@ -745,12 +880,23 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
         db.commit()
         return
 
-    sender = select_next_sender_account(lead.campaign_id, db)
+    sender = (
+        db.query(SenderAccount)
+        .options(joinedload(SenderAccount.warmup_settings))
+        .filter(
+            SenderAccount.account_id == sender_id,
+            SenderAccount.status.in_(("active", "warming_up")),
+            SenderAccount.deleted_at.is_(None),
+            SenderAccount.is_verified.is_(True),
+        )
+        .first()
+    )
     if not sender:
+        fallback_at = _next_step_schedule_utc(lead.campaign, current_step, now)
         lead.delivery_state = "queued"
         lead.lock_token = None
         lead.locked_at = None
-        lead.next_scheduled_at = now + timedelta(minutes=10)
+        lead.next_eligible_at = fallback_at
         db.commit()
         return
 
@@ -791,9 +937,11 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
     except Exception as exc:
         db.delete(sent_row)
         db.flush()
-        lead.delivery_state = "failed"
+        sender.next_ready_at = _next_sender_ready_at(now)
+        lead.delivery_state = "queued"
         lead.lock_token = None
         lead.locked_at = None
+        lead.next_eligible_at = now + timedelta(hours=1)
         db.add(
             EmailEvent(
                 lead_id=lead.lead_id,
@@ -811,16 +959,17 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
     sent_row.event_metadata = {"message_id": message_id}
     sender.sent_count_today = int(sender.sent_count_today or 0) + 1
     sender.last_used_at = now
+    sender.next_ready_at = _next_sender_ready_at(now)
 
     next_step = _resolve_followup_step(current_step, db)
     if next_step:
         lead.next_step_id = next_step.step_id
-        lead.next_scheduled_at = _next_step_schedule_utc(lead.campaign, next_step, now)
+        lead.next_eligible_at = _next_step_schedule_utc(lead.campaign, next_step, now)
         lead.delivery_state = "queued"
     else:
         lead.next_step_id = None
-        lead.next_scheduled_at = None
-        lead.delivery_state = "sent"
+        lead.next_eligible_at = None
+        lead.delivery_state = "completed"
 
     lead.lock_token = None
     lead.locked_at = None

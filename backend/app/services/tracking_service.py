@@ -93,6 +93,36 @@ def log_click_event(source_event_id: str, target_url: str, request: Request, db:
     metadata = _request_metadata(request)
     metadata["url"] = target_url
     metadata["source_sent_event_id"] = str(source.event_id)
+
+    # If image-pixel open tracking is blocked/unreachable, a real click still
+    # proves the email was opened. Backfill one "opened" event idempotently.
+    sent_key = str(source.event_id)
+    existing_open = (
+        db.query(EmailEvent.event_id)
+        .filter(
+            EmailEvent.event_type == "opened",
+            EmailEvent.event_metadata["source_sent_event_id"].astext == sent_key,
+        )
+        .first()
+    )
+    if not existing_open:
+        open_meta = _request_metadata(request)
+        open_meta["source_sent_event_id"] = sent_key
+        open_meta["via"] = "click_backfill"
+        db.add(
+            EmailEvent(
+                lead_id=source.lead_id,
+                step_id=source.step_id,
+                event_type="opened",
+                event_scope=source.event_scope,
+                sender_account_id=source.sender_account_id,
+                recipient_account_id=source.recipient_account_id,
+                warmup_thread_id=source.warmup_thread_id,
+                occurred_at=datetime.now(timezone.utc),
+                event_metadata=open_meta,
+            )
+        )
+
     evt = EmailEvent(
         lead_id=source.lead_id,
         step_id=source.step_id,

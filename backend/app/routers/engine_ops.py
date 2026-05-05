@@ -3,12 +3,13 @@ routers/engine_ops.py — Operator endpoints for on-demand sending engine action
 """
 
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.dependencies import require_permission
 from app.models import Campaign, Lead, SenderAccount
 from app.services import sending_engine_service
@@ -16,6 +17,7 @@ from app.services.unibox import ingestion_service
 from app.workers.engine_loops import is_engine_enabled, set_engine_enabled
 
 router = APIRouter()
+SEND_WORKER_COUNT = 4
 
 
 class EngineToggleIn(BaseModel):
@@ -47,8 +49,8 @@ def engine_status(
             Campaign.status == "active",
             Lead.lead_status == "active",
             Lead.delivery_state == "queued",
-            Lead.next_scheduled_at.isnot(None),
-            Lead.next_scheduled_at <= now,
+            Lead.next_eligible_at.isnot(None),
+            Lead.next_eligible_at <= now,
         )
         .count()
     )
@@ -85,16 +87,36 @@ def run_send_once(
     _: None = require_permission("manage_email_accounts"),
     db: Session = Depends(get_db),
 ):
+    completed_leads = (
+        db.query(Lead)
+        .join(Campaign, Campaign.campaign_id == Lead.campaign_id)
+        .filter(
+            Campaign.workspace_id == workspace_id,
+            Campaign.status == "active",
+            Lead.lead_status == "active",
+            Lead.delivery_state == "completed",
+            Lead.next_eligible_at.is_(None),
+        )
+        .count()
+    )
     claims = sending_engine_service.claim_queued_leads(
         batch_size=20, db=db, workspace_id=workspace_id
     )
+    def _process_one(claim: tuple[str, str, str]) -> bool:
+        lead_id, token, sender_id = claim
+        with SessionLocal() as worker_db:
+            sending_engine_service.process_claimed_lead(lead_id, token, sender_id, worker_db)
+        return True
+
     processed = 0
-    for lead_id, token in claims:
-        sending_engine_service.process_claimed_lead(lead_id, token, db)
-        processed += 1
+    if claims:
+        with ThreadPoolExecutor(max_workers=SEND_WORKER_COUNT) as executor:
+            futures = [executor.submit(_process_one, claim) for claim in claims]
+            for fut in as_completed(futures):
+                _ = fut.result()
+                processed += 1
     hint = None
     if not claims:
-        now = datetime.now(timezone.utc)
         total_queued = (
             db.query(Lead)
             .join(Campaign, Campaign.campaign_id == Lead.campaign_id)
@@ -106,10 +128,16 @@ def run_send_once(
             .count()
         )
         if total_queued == 0:
-            hint = (
-                "No leads are queued in active campaigns for this workspace. "
-                "Enroll leads and ensure the campaign is active with a sender pool."
-            )
+            if completed_leads > 0:
+                hint = (
+                    f"No leads are queued right now. {completed_leads} lead(s) are already completed "
+                    "with no next step scheduled. Add another sequence step (or add new leads) to create queue."
+                )
+            else:
+                hint = (
+                    "No leads are queued in active campaigns for this workspace. "
+                    "Enroll leads and ensure the campaign is active with a sender pool."
+                )
         else:
             hint = (
                 f"{total_queued} lead(s) are queued but none are ready to send right now "
@@ -148,11 +176,16 @@ def run_imap_once(
             SenderAccount.imap_host.isnot(None),
             SenderAccount.imap_port.isnot(None),
             SenderAccount.app_password.isnot(None),
-            SenderAccount.status.in_(("active", "warming_up")),
+            SenderAccount.status == "active",
             SenderAccount.deleted_at.is_(None),
         )
         .all()
     )
+    accounts = [
+        a
+        for a in accounts
+        if not (a.warmup_settings and getattr(a.warmup_settings, "is_warmup_active", False))
+    ]
     try:
         ingested, replies_from_ingest = ingestion_service.ingest_accounts_parallel(
             [a.account_id for a in accounts]
@@ -165,7 +198,7 @@ def run_imap_once(
     # on this request session so any future reads see fresh DB state.
     db.expire_all()
 
-    sending_engine_service.run_imap_reply_iteration(db)
+    # Do not scan warmup inboxes during lead IMAP scans.
 
     scan_note = None
     if ingested == 0 and replies_from_ingest == 0:

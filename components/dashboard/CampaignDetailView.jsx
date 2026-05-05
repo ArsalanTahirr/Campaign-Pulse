@@ -211,6 +211,7 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus, onUploaded, onLeadD
   }, [leadPendingRemove]);
 
   const isLeadMutationLocked = ["completed", "deleted"].includes(campaignStatus);
+  const isLeadDeleteLocked = ["active", "completed", "deleted"].includes(campaignStatus);
 
   async function confirmRemoveLead() {
     if (!leadPendingRemove || deletingLeadId) return;
@@ -330,10 +331,12 @@ function LeadsTab({ workspaceId, campaignId, campaignStatus, onUploaded, onLeadD
                     <PermissionGate action="manage_leads">
                       <button
                         type="button"
-                        disabled={isLeadMutationLocked || deletingLeadId === lead.lead_id}
+                        disabled={isLeadDeleteLocked || deletingLeadId === lead.lead_id}
                         title={
-                          isLeadMutationLocked
-                            ? "View-only campaign — leads cannot be changed."
+                          isLeadDeleteLocked
+                            ? campaignStatus === "active"
+                              ? "Stop or pause the campaign before deleting leads."
+                              : "View-only campaign — leads cannot be changed."
                             : "Remove lead from this campaign"
                         }
                         aria-label={`Remove lead ${lead.email}`}

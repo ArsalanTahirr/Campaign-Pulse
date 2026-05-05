@@ -1015,12 +1015,12 @@ class Lead(Base):
         comment="Outreach funnel status: active | replied | unsubscribed | bounced | completed.",
     )
 
-    # Absolute UTC timestamp when this lead should be considered for the next send.
+    # Absolute UTC timestamp when this lead becomes eligible for the next send.
     # Precomputing this avoids re-calculating schedule math in each scheduler loop.
-    next_scheduled_at = Column(
+    next_eligible_at = Column(
         TIMESTAMP(timezone=True),
         nullable=True,
-        comment="UTC timestamp when the next step email should fire for this lead.",
+        comment="UTC timestamp gate for when this lead becomes eligible for sending.",
     )
 
     # Lightweight delivery lock state for atomic worker processing.
@@ -1029,7 +1029,7 @@ class Lead(Base):
         nullable=False,
         default="queued",
         server_default=text("'queued'"),
-        comment="Worker state: queued | sending | sent | failed | paused.",
+        comment="Worker state: queued | sending | sent | failed | paused | completed.",
     )
     locked_at = Column(
         TIMESTAMP(timezone=True),
@@ -1107,18 +1107,18 @@ class Lead(Base):
             name="ck_lead_status",
         ),
         CheckConstraint(
-            "delivery_state IN ('queued','sending','sent','failed','paused')",
+            "delivery_state IN ('queued','sending','sent','failed','paused','completed')",
             name="ck_lead_delivery_state",
         ),
         Index(
-            "ix_lead_next_scheduled_state",
-            "next_scheduled_at",
+            "ix_lead_next_eligible_state",
+            "next_eligible_at",
             "delivery_state",
         ),
         Index(
-            "ix_lead_campaign_next_scheduled",
+            "ix_lead_campaign_next_eligible",
             "campaign_id",
-            "next_scheduled_at",
+            "next_eligible_at",
         ),
         Index(
             "ix_lead_next_step_id",
@@ -1437,6 +1437,11 @@ class SenderAccount(Base):
         TIMESTAMP(timezone=True),
         nullable=True,
         comment="UTC timestamp of the most recent send from this account.",
+    )
+    next_ready_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when this sender is next eligible to send.",
     )
 
     created_at = Column(

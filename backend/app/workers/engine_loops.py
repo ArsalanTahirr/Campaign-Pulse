@@ -4,6 +4,7 @@ workers/engine_loops.py — Background loops for sending, warmup, and IMAP reply
 
 import asyncio
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.database import SessionLocal
 from app.services import sending_engine_service
@@ -14,6 +15,7 @@ SEND_BATCH_SIZE = int(os.environ.get("SEND_BATCH_SIZE", "20"))
 WARMUP_LOOP_SECONDS = int(os.environ.get("WARMUP_LOOP_SECONDS", "900"))
 IMAP_LOOP_SECONDS = int(os.environ.get("IMAP_LOOP_SECONDS", "120"))
 _ENGINE_ENABLED = os.environ.get("ENABLE_SENDING_ENGINE", "false").lower() == "true"
+SEND_WORKER_COUNT = 4
 
 
 def is_engine_enabled() -> bool:
@@ -31,13 +33,29 @@ async def sending_loop():
             if is_engine_enabled():
                 with SessionLocal() as db:
                     claims = sending_engine_service.claim_queued_leads(SEND_BATCH_SIZE, db)
-                for lead_id, token in claims:
-                    with SessionLocal() as db:
-                        sending_engine_service.process_claimed_lead(lead_id, token, db)
+                if claims:
+                    with ThreadPoolExecutor(max_workers=SEND_WORKER_COUNT) as executor:
+                        futures = []
+                        for lead_id, token, sender_id in claims:
+                            futures.append(
+                                executor.submit(
+                                    _process_claim_in_worker,
+                                    lead_id,
+                                    token,
+                                    sender_id,
+                                )
+                            )
+                        for fut in as_completed(futures):
+                            fut.result()
         except Exception:
             # Keep loop alive; failures are persisted per-lead where possible.
             pass
         await asyncio.sleep(SEND_LOOP_SECONDS)
+
+
+def _process_claim_in_worker(lead_id: str, token: str, sender_id: str) -> None:
+    with SessionLocal() as db:
+        sending_engine_service.process_claimed_lead(lead_id, token, sender_id, db)
 
 
 async def warmup_loop():

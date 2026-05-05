@@ -3,6 +3,7 @@ services/sequence_service.py — SequenceStep and StepEmail management.
 """
 
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -10,7 +11,8 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Campaign, SequenceStep, StepEmail
+from app.models import Campaign, Lead, SequenceStep, StepEmail
+from app.services import sending_engine_service
 
 
 def _get_step_or_404(step_id: str, campaign_id: str, db: Session) -> SequenceStep:
@@ -88,6 +90,81 @@ def list_steps(campaign_id: str, db: Session) -> list[SequenceStep]:
     )
 
 
+def _reconcile_lead_schedules_after_sequence_change(campaign_id: str, db: Session) -> None:
+    """
+    Keep lead scheduling aligned with sequence edits.
+
+    Cases covered:
+    - New step added after leads were completed (next_step_id/next_eligible_at NULL)
+    - Step removed causing leads to reference a missing next_step_id
+
+    Important: do not rewrite leads that already have a valid next_step_id,
+    otherwise queue ordering gets reset unexpectedly.
+    """
+    campaign = db.query(Campaign).filter(Campaign.campaign_id == campaign_id).first()
+    if not campaign:
+        return
+
+    steps = (
+        db.query(SequenceStep)
+        .filter(SequenceStep.campaign_id == campaign_id)
+        .order_by(SequenceStep.step_number.asc())
+        .all()
+    )
+    step_by_id = {step.step_id: step for step in steps}
+    first_step = steps[0] if steps else None
+    last_step = steps[-1] if steps else None
+    now = datetime.now(timezone.utc)
+
+    leads = (
+        db.query(Lead)
+        .filter(
+            Lead.campaign_id == campaign_id,
+            Lead.lead_status == "active",
+        )
+        .all()
+    )
+
+    for lead in leads:
+        # In-flight workers should not be rewritten.
+        if lead.delivery_state == "sending":
+            continue
+
+        if not steps:
+            lead.next_step_id = None
+            lead.next_eligible_at = None
+            if lead.delivery_state == "queued":
+                lead.delivery_state = "completed"
+            continue
+
+        current_step = step_by_id.get(lead.next_step_id) if lead.next_step_id else None
+        if current_step:
+            # Preserve existing queue state/schedule for leads that already
+            # point to a valid step.
+            continue
+
+        if lead.delivery_state == "completed":
+            # Sequence was extended after completion: continue at new last step.
+            lead.next_step_id = last_step.step_id
+            lead.next_eligible_at = sending_engine_service._next_step_schedule_utc(
+                campaign,
+                last_step,
+                now,
+            )
+            lead.delivery_state = "queued"
+            continue
+
+        if lead.delivery_state in {"queued", "failed", "paused", "sent"}:
+            # Missing/removed step pointer: recover to first step so lead remains schedulable.
+            lead.next_step_id = first_step.step_id
+            lead.next_eligible_at = sending_engine_service._next_step_schedule_utc(
+                campaign,
+                first_step,
+                now,
+            )
+            lead.delivery_state = "queued"
+
+
 def create_step(
     campaign_id: str,
     step_number: int,
@@ -145,6 +222,7 @@ def create_step(
         )
         db.add(variant)
 
+    _reconcile_lead_schedules_after_sequence_change(campaign_id, db)
     db.commit()
     db.refresh(step)
     return step
@@ -195,6 +273,8 @@ def delete_step(step_id: str, campaign_id: str, db: Session) -> None:
     _assert_sequence_editable(campaign_id, db)
     step = _get_step_or_404(step_id, campaign_id, db)
     db.delete(step)
+    db.flush()
+    _reconcile_lead_schedules_after_sequence_change(campaign_id, db)
     db.commit()
 
 
