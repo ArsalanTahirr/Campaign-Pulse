@@ -2,14 +2,17 @@
 routers/engine_ops.py — Operator endpoints for on-demand sending engine actions.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.dependencies import require_permission
-from app.models import Campaign, Lead
+from app.models import Campaign, Lead, SenderAccount
 from app.services import sending_engine_service
+from app.services.unibox import ingestion_service
 from app.workers.engine_loops import is_engine_enabled, set_engine_enabled
 
 router = APIRouter()
@@ -25,6 +28,7 @@ def engine_status(
     _: None = require_permission("manage_email_accounts"),
     db: Session = Depends(get_db),
 ):
+    now = datetime.now(timezone.utc)
     queued = (
         db.query(Lead)
         .join(Campaign, Campaign.campaign_id == Lead.campaign_id)
@@ -32,6 +36,19 @@ def engine_status(
             Campaign.workspace_id == workspace_id,
             Campaign.status == "active",
             Lead.delivery_state == "queued",
+        )
+        .count()
+    )
+    queued_ready = (
+        db.query(Lead)
+        .join(Campaign, Campaign.campaign_id == Lead.campaign_id)
+        .filter(
+            Campaign.workspace_id == workspace_id,
+            Campaign.status == "active",
+            Lead.lead_status == "active",
+            Lead.delivery_state == "queued",
+            Lead.next_scheduled_at.isnot(None),
+            Lead.next_scheduled_at <= now,
         )
         .count()
     )
@@ -47,6 +64,7 @@ def engine_status(
     return {
         "engine_enabled": is_engine_enabled(),
         "queued_leads": queued,
+        "queued_ready": queued_ready,
         "sending_leads": sending,
     }
 
@@ -67,12 +85,37 @@ def run_send_once(
     _: None = require_permission("manage_email_accounts"),
     db: Session = Depends(get_db),
 ):
-    claims = sending_engine_service.claim_queued_leads(batch_size=20, db=db)
+    claims = sending_engine_service.claim_queued_leads(
+        batch_size=20, db=db, workspace_id=workspace_id
+    )
     processed = 0
     for lead_id, token in claims:
         sending_engine_service.process_claimed_lead(lead_id, token, db)
         processed += 1
-    return {"claimed": len(claims), "processed": processed}
+    hint = None
+    if not claims:
+        now = datetime.now(timezone.utc)
+        total_queued = (
+            db.query(Lead)
+            .join(Campaign, Campaign.campaign_id == Lead.campaign_id)
+            .filter(
+                Campaign.workspace_id == workspace_id,
+                Campaign.status == "active",
+                Lead.delivery_state == "queued",
+            )
+            .count()
+        )
+        if total_queued == 0:
+            hint = (
+                "No leads are queued in active campaigns for this workspace. "
+                "Enroll leads and ensure the campaign is active with a sender pool."
+            )
+        else:
+            hint = (
+                f"{total_queued} lead(s) are queued but none are ready to send right now "
+                "(paused lead, missing next send time, or next send time is still in the future)."
+            )
+    return {"claimed": len(claims), "processed": processed, "hint": hint}
 
 
 @router.post("/run-warmup-once")
@@ -91,5 +134,50 @@ def run_imap_once(
     _: None = require_permission("manage_email_accounts"),
     db: Session = Depends(get_db),
 ):
-    replies = sending_engine_service.run_imap_reply_iteration(db)
-    return {"replies_detected": replies}
+    """
+    Poll all configured sender inboxes: parallel Unibox ingestion (replies +
+    messages), then warmup spam rescue. Reply events are only recorded during
+    ingestion so they stay aligned with Unibox rows.
+    """
+    ingested = 0
+    replies_from_ingest = 0
+    accounts = (
+        db.query(SenderAccount)
+        .options(joinedload(SenderAccount.warmup_settings))
+        .filter(
+            SenderAccount.imap_host.isnot(None),
+            SenderAccount.imap_port.isnot(None),
+            SenderAccount.app_password.isnot(None),
+            SenderAccount.status.in_(("active", "warming_up")),
+            SenderAccount.deleted_at.is_(None),
+        )
+        .all()
+    )
+    try:
+        ingested, replies_from_ingest = ingestion_service.ingest_accounts_parallel(
+            [a.account_id for a in accounts]
+        )
+    except Exception:
+        db.rollback()
+        ingested, replies_from_ingest = 0, 0
+
+    # Workers committed updated last_imap_uid; expire cached SenderAccount rows
+    # on this request session so any future reads see fresh DB state.
+    db.expire_all()
+
+    sending_engine_service.run_imap_reply_iteration(db)
+
+    scan_note = None
+    if ingested == 0 and replies_from_ingest == 0:
+        scan_note = (
+            "No new lead mail in the scanned UID range. Inbox scan only records messages "
+            "whose From address matches a lead email in this workspace. "
+            'The "Queue" badge is the outbound send queue (leads waiting to be emailed), not IMAP. '
+            "If you expected new mail, verify IMAP credentials, that the lead exists with the same address as From, or reset last_imap_uid (see backend/scripts/reset_unibox_imap_test.py)."
+        )
+
+    return {
+        "replies_detected": replies_from_ingest,
+        "messages_ingested": ingested,
+        "scan_note": scan_note,
+    }

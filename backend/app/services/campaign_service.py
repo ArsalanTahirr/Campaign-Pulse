@@ -79,6 +79,17 @@ def _assert_has_sender_pool(campaign_id: str, db: Session) -> None:
         )
 
 
+def _assert_has_leads(campaign_id: str, db: Session) -> None:
+    lead_count = (
+        db.query(func.count(Lead.lead_id)).filter(Lead.campaign_id == campaign_id).scalar() or 0
+    )
+    if lead_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Campaign must have at least one lead before starting or resuming.",
+        )
+
+
 def get_campaign_or_404(campaign_id: str, workspace_id: str, db: Session) -> Campaign:
     campaign = (
         db.query(Campaign)
@@ -283,6 +294,10 @@ def transition_campaign(
     if action == "started":
         _assert_has_email_variants(campaign_id, db)
         _assert_has_sender_pool(campaign_id, db)
+        _assert_has_leads(campaign_id, db)
+
+    if action == "resumed":
+        _assert_has_leads(campaign_id, db)
 
     old_status = current_status
     campaign.status = transition["to"]

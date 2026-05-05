@@ -5,7 +5,7 @@ schemas/sequence.py — Pydantic v2 models for SequenceSteps and StepEmails.
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _VALID_WEEKDAYS = frozenset(
     ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -50,7 +50,12 @@ class SequenceStepCreate(BaseModel):
     send_time: str = Field(
         ...,
         pattern=r"^\d{2}:\d{2}$",
-        description="Step send time in HH:MM 24-hour format (campaign timezone).",
+        description="Start of daily send window (HH:MM, 24-hour, campaign timezone).",
+    )
+    send_window_end: str = Field(
+        default="17:00",
+        pattern=r"^\d{2}:\d{2}$",
+        description="End of daily send window (HH:MM, inclusive, campaign timezone).",
     )
     send_days: list[str] = Field(
         ...,
@@ -73,11 +78,18 @@ class SequenceStepCreate(BaseModel):
             )
         return v
 
+    @model_validator(mode="after")
+    def validate_send_window(self) -> "SequenceStepCreate":
+        if self.send_window_end < self.send_time:
+            raise ValueError("send_window_end must be greater than or equal to send_time.")
+        return self
+
 
 class SequenceStepUpdate(BaseModel):
     step_number: Optional[int] = Field(None, ge=1)
     wait_days: Optional[int] = Field(None, ge=0)
     send_time: Optional[str] = Field(None, pattern=r"^\d{2}:\d{2}$")
+    send_window_end: Optional[str] = Field(None, pattern=r"^\d{2}:\d{2}$")
     send_days: Optional[list[str]] = Field(
         None,
         min_length=1,
@@ -103,6 +115,7 @@ class SequenceStepOut(BaseModel):
     step_number: int
     wait_days: int
     send_time: Optional[str] = None
+    send_window_end: Optional[str] = None
     send_days: Optional[Any] = None
     email_variants: list[StepEmailOut] = []
 

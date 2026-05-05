@@ -5,16 +5,20 @@ services/sending_engine_service.py — Core sending, warmup, and reply-detection
 import imaplib
 import math
 import os
+import random
 import re
 import smtplib
 import ssl
+import time
 import uuid
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+from datetime import time as dt_time
+from email.header import decode_header
 from email.message import EmailMessage
-from email.utils import parseaddr
+from email.utils import formataddr, parseaddr
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
@@ -31,6 +35,340 @@ from app.services.tracking_service import sign_click_target
 
 TRACKING_BASE_URL = os.environ.get("TRACKING_BASE_URL", "http://localhost:8000")
 MERGE_TAG_PATTERN = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
+# Socket read timeout for IMAP (avoids hung HTTP requests when a server stops responding).
+IMAP_SOCKET_TIMEOUT = int(os.environ.get("IMAP_SOCKET_TIMEOUT", "90"))
+# Batch OR(FROM…) searches so global warmup pools don’t issue hundreds of SEARCH commands per folder.
+_IMAP_FROM_SEARCH_CHUNK = int(os.environ.get("IMAP_WARMUP_FROM_SEARCH_CHUNK", "12"))
+# How many messages per UID FETCH round-trip (SUBJECT/FROM header peek).
+_IMAP_FETCH_BATCH = int(os.environ.get("IMAP_FETCH_BATCH", "40"))
+
+# Peer warmup: randomized professional copy (subject + html + plain). Keep subjects unique for IMAP rescue matching.
+WARMUP_MESSAGE_PAIRS: list[tuple[str, str, str]] = [
+    (
+        "Quick sync on next steps",
+        "<p>Hi — when you have a moment, could we do a quick sync on next steps?</p>",
+        "Hi — when you have a moment, could we do a quick sync on next steps?",
+    ),
+    (
+        "Following up on our last note",
+        "<p>Just following up on our last note — let me know if today still works on your side.</p>",
+        "Just following up on our last note — let me know if today still works on your side.",
+    ),
+    (
+        "Question about the shared doc",
+        "<p>I had a small question about the shared doc — happy to jump on a short call if easier.</p>",
+        "I had a small question about the shared doc — happy to jump on a short call if easier.",
+    ),
+    (
+        "Circling back on the timeline",
+        "<p>Circling back on the timeline we discussed — any updates from your team?</p>",
+        "Circling back on the timeline we discussed — any updates from your team?",
+    ),
+    (
+        "Quick check-in before Friday",
+        "<p>Quick check-in before Friday — want to make sure we’re aligned on deliverables.</p>",
+        "Quick check-in before Friday — want to make sure we're aligned on deliverables.",
+    ),
+    (
+        "Thanks for the update",
+        "<p>Thanks for the update earlier — this looks good from my side.</p>",
+        "Thanks for the update earlier — this looks good from my side.",
+    ),
+    (
+        "Availability for a brief call",
+        "<p>Do you have 15 minutes tomorrow for a brief call? I can send a calendar invite.</p>",
+        "Do you have 15 minutes tomorrow for a brief call? I can send a calendar invite.",
+    ),
+    (
+        "Sharing a quick thought",
+        "<p>Sharing a quick thought on the approach we talked about — open to your feedback.</p>",
+        "Sharing a quick thought on the approach we talked about — open to your feedback.",
+    ),
+    (
+        "Looping in on the decision",
+        "<p>Looping you in on the decision — no rush, whenever you can take a look.</p>",
+        "Looping you in on the decision — no rush, whenever you can take a look.",
+    ),
+    (
+        "Minor edit to the draft",
+        "<p>I made a minor edit to the draft — feel free to comment when you get a chance.</p>",
+        "I made a minor edit to the draft — feel free to comment when you get a chance.",
+    ),
+    (
+        "Confirming receipt",
+        "<p>Confirming receipt of your last message — I’ll follow up with details shortly.</p>",
+        "Confirming receipt of your last message — I'll follow up with details shortly.",
+    ),
+    (
+        "Next week’s planning",
+        "<p>For next week’s planning, are we still targeting the same milestone?</p>",
+        "For next week's planning, are we still targeting the same milestone?",
+    ),
+]
+
+WARMUP_SUBJECTS_LOWER: frozenset[str] = frozenset(s.lower() for s, _, _ in WARMUP_MESSAGE_PAIRS)
+
+_SPAM_FOLDER_CANDIDATES: tuple[str, ...] = (
+    "[Gmail]/Spam",
+    "Spam",
+    "Junk",
+    "Junk E-mail",
+    "Bulk Mail",
+)
+
+
+def _pick_warmup_message() -> tuple[str, str, str]:
+    return random.choice(WARMUP_MESSAGE_PAIRS)
+
+
+def _warmup_decode_subject_header(raw: str) -> str:
+    parts = decode_header((raw or "").strip())
+    chunks: list[str] = []
+    for part, charset in parts:
+        if isinstance(part, bytes):
+            chunks.append(part.decode(charset or "utf-8", errors="replace"))
+        else:
+            chunks.append(str(part))
+    return "".join(chunks).strip()
+
+
+def _warmup_subject_normalized_for_match(raw: str) -> str:
+    s = _warmup_decode_subject_header(raw)
+    while True:
+        low = s.lower()
+        if low.startswith("re:"):
+            s = s[3:].strip()
+        elif low.startswith("fwd:"):
+            s = s[4:].strip()
+        elif low.startswith("fw:"):
+            s = s[3:].strip()
+        else:
+            break
+    return s.strip().lower()
+
+
+def _warmup_subject_matches_known(subject_header_value: str) -> bool:
+    return _warmup_subject_normalized_for_match(subject_header_value) in WARMUP_SUBJECTS_LOWER
+
+
+def _imap_quote_addr(addr: str) -> str:
+    return addr.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _imap_search_criterion_from_any(peers: list[str]) -> str:
+    """IMAP SEARCH criterion: match if From is any of the quoted addresses (nested OR)."""
+    esc = [_imap_quote_addr(p) for p in peers]
+    if len(esc) == 1:
+        return f'(FROM "{esc[0]}")'
+    tail = f'(FROM "{esc[-1]}")'
+    for i in range(len(esc) - 2, -1, -1):
+        tail = f'(OR (FROM "{esc[i]}") {tail})'
+    return tail
+
+
+def _imap_uid_search_from_peer_chunks(client: imaplib.IMAP4_SSL, peers: list[str]) -> set[str]:
+    """Union UID SEARCH results; peers chunked to keep each SEARCH criterion small."""
+    uid_set: set[str] = set()
+    if not peers:
+        return uid_set
+    chunk = max(1, _IMAP_FROM_SEARCH_CHUNK)
+    for i in range(0, len(peers), chunk):
+        part = peers[i : i + chunk]
+        try:
+            crit = _imap_search_criterion_from_any(part)
+            st, data = client.uid("SEARCH", None, crit)
+            if st != "OK" or not data or not data[0]:
+                continue
+            for u in (data[0] or b"").split():
+                uid_set.add(u.decode("utf-8"))
+        except Exception:
+            continue
+    return uid_set
+
+
+def _header_block_folded_subject(header_text: str) -> str:
+    """Parse Subject value from a HEADER.FIELDS (SUBJECT) block (handles folded lines)."""
+    subj_parts: list[str] = []
+    in_subj = False
+    for raw_line in header_text.splitlines():
+        line = raw_line.rstrip("\r")
+        if line.lower().startswith("subject:"):
+            subj_parts.append(line.split(":", 1)[1].strip())
+            in_subj = True
+        elif in_subj and line and line[0] in " \t":
+            subj_parts.append(" " + line.strip())
+        elif in_subj:
+            break
+    return "".join(subj_parts)
+
+
+def _imap_batch_fetch_uid_header_fields(
+    client: imaplib.IMAP4_SSL,
+    uids: list[str],
+    header_field_names: str,
+) -> dict[str, bytes]:
+    """
+    Batch UID FETCH for BODY.PEEK[HEADER.FIELDS (...)].
+    `header_field_names` e.g. \"SUBJECT\" or \"FROM\". Falls back to per-UID FETCH when needed.
+    """
+    out: dict[str, bytes] = {}
+    if not uids:
+        return out
+    fetch_item = f"(BODY.PEEK[HEADER.FIELDS ({header_field_names})])"
+    batch = max(1, _IMAP_FETCH_BATCH)
+
+    def fetch_one(uid: str) -> None:
+        if uid in out:
+            return
+        try:
+            st, msg_data = client.uid("FETCH", uid, fetch_item)
+            if st != "OK" or not msg_data:
+                return
+            for part in msg_data:
+                if isinstance(part, tuple) and len(part) >= 2:
+                    _meta, payload = part[0], part[1]
+                    if isinstance(payload, bytes):
+                        out[uid] = payload
+                    return
+        except Exception:
+            return
+
+    for i in range(0, len(uids), batch):
+        chunk = uids[i : i + batch]
+        uid_spec = ",".join(chunk)
+        try:
+            st, data = client.uid("FETCH", uid_spec, fetch_item)
+            if st == "OK" and data:
+                for part in data:
+                    if isinstance(part, tuple) and len(part) >= 2:
+                        meta, payload = part[0], part[1]
+                        meta_b = meta if isinstance(meta, bytes) else str(meta).encode("utf-8", errors="replace")
+                        m = re.search(rb"UID (\d+)", meta_b)
+                        if m and isinstance(payload, bytes):
+                            out[m.group(1).decode("ascii")] = payload
+        except Exception:
+            pass
+        for u in chunk:
+            if u not in out:
+                fetch_one(u)
+    return out
+
+
+def _imap_try_select_mailbox(client: imaplib.IMAP4_SSL, mailbox: str) -> bool:
+    """Try SELECT with and without quoting (providers differ)."""
+    candidates = [mailbox]
+    if " " in mailbox and not (mailbox.startswith('"') and mailbox.endswith('"')):
+        candidates.insert(0, f'"{mailbox}"')
+    for mbox in candidates:
+        try:
+            typ, _ = client.select(mbox)
+            if typ == "OK":
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _imap_rescue_warmup_spam_on_client(
+    client: imaplib.IMAP4_SSL,
+    account: SenderAccount,
+    peer_emails_lower: set[str],
+) -> None:
+    """
+    Move messages in Spam/Junk from other global warmup-pool senders (matching known subjects) into INBOX.
+    Caller must have already authenticated `client`. Leaves the session authenticated; caller should SELECT INBOX after.
+    """
+    if not peer_emails_lower:
+        return
+
+    try:
+        self_lower = (account.email or "").lower()
+        peers_excl = sorted(p for p in peer_emails_lower if p != self_lower)
+        if not peers_excl:
+            return
+
+        for spam_folder in _SPAM_FOLDER_CANDIDATES:
+            if not _imap_try_select_mailbox(client, spam_folder):
+                continue
+
+            uid_set = _imap_uid_search_from_peer_chunks(client, peers_excl)
+            sorted_uids = sorted(uid_set, key=lambda x: int(x) if x.isdigit() else 0)
+            subj_by_uid = _imap_batch_fetch_uid_header_fields(client, sorted_uids, "SUBJECT")
+
+            to_move: list[str] = []
+            for uid in sorted_uids:
+                blob = subj_by_uid.get(uid)
+                if not blob:
+                    continue
+                subj_line = _header_block_folded_subject(blob.decode("utf-8", errors="ignore"))
+                if _warmup_subject_matches_known(subj_line):
+                    to_move.append(uid)
+
+            for uid in to_move:
+                try:
+                    st, _ = client.uid("COPY", uid, "INBOX")
+                    if st == "OK":
+                        client.uid("STORE", uid, "+FLAGS", "\\Deleted")
+                except Exception:
+                    continue
+            if to_move:
+                try:
+                    client.expunge()
+                except Exception:
+                    pass
+
+            try:
+                client.close()
+            except Exception:
+                pass
+            # One junk mailbox per account in practice; avoids extra SELECT attempts.
+            break
+    except Exception:
+        return
+
+
+def _imap_rescue_warmup_spam_to_inbox(
+    account: SenderAccount,
+    peer_emails_lower: set[str],
+) -> None:
+    """
+    Open IMAP for `account` and run global-pool spam rescue (same peer set as warmup sends).
+    """
+    if not account.imap_host or not account.imap_port or not account.app_password:
+        return
+    if not peer_emails_lower:
+        return
+
+    try:
+        with imaplib.IMAP4_SSL(
+            account.imap_host, int(account.imap_port), timeout=IMAP_SOCKET_TIMEOUT
+        ) as client:
+            client.login(account.email, account.app_password)
+            _imap_rescue_warmup_spam_on_client(client, account, peer_emails_lower)
+    except Exception:
+        return
+
+
+def load_global_warmup_pool(db: Session) -> list[SenderAccount]:
+    """All verified senders with SMTP + app password and warmup active — global pool (any workspace)."""
+    rows = (
+        db.query(SenderAccount)
+        .options(joinedload(SenderAccount.warmup_settings))
+        .filter(
+            SenderAccount.status.in_(("active", "warming_up")),
+            SenderAccount.deleted_at.is_(None),
+            SenderAccount.is_verified.is_(True),
+            SenderAccount.smtp_host.isnot(None),
+            SenderAccount.smtp_port.isnot(None),
+            SenderAccount.app_password.isnot(None),
+        )
+        .all()
+    )
+    return [acc for acc in rows if acc.warmup_settings and acc.warmup_settings.is_warmup_active]
+
+
+def global_warmup_peer_emails_lower(pool: list[SenderAccount]) -> set[str]:
+    return {(a.email or "").lower() for a in pool if a.email}
 
 
 def _effective_daily_limit(account: SenderAccount) -> int:
@@ -68,33 +406,88 @@ def select_next_sender_account(campaign_id: str, db: Session) -> SenderAccount |
     return None
 
 
-def _parse_send_time(send_time_value: str | None, tz_name: str) -> datetime:
-    now_local = datetime.now(ZoneInfo(tz_name))
-    if not send_time_value:
-        return now_local
-    hh, mm = send_time_value.split(":")
-    scheduled_local = datetime.combine(now_local.date(), time(int(hh), int(mm)), tzinfo=ZoneInfo(tz_name))
-    if scheduled_local < now_local:
-        scheduled_local = scheduled_local + timedelta(days=1)
-    return scheduled_local
+def _hhmm_to_time(hhmm: str) -> dt_time:
+    hh, mm = hhmm.split(":")
+    return dt_time(int(hh), int(mm))
+
+
+def _send_window_end_str(step: SequenceStep) -> str | None:
+    if not step.send_time:
+        return None
+    return step.send_window_end or step.send_time
+
+
+def _send_window_bounds_on_date(
+    step: SequenceStep,
+    tz: ZoneInfo,
+    on_date: datetime.date,
+) -> tuple[datetime, datetime] | None:
+    """
+    Inclusive daily window [lo, hi] in `tz`. None if step has no send_time (whole day used elsewhere).
+
+    When start and end are the same HH:MM, this is a single *slot* (that whole minute), not a 24-hour
+    window — same as typical ESP "send at this time" behavior. For an all-day window use 00:00–23:59.
+    """
+    if not step.send_time:
+        return None
+    end_s = _send_window_end_str(step)
+    if not end_s:
+        return None
+    lo = datetime.combine(on_date, _hhmm_to_time(step.send_time), tzinfo=tz)
+    hi = datetime.combine(on_date, _hhmm_to_time(end_s), tzinfo=tz)
+    if hi < lo:
+        return None
+    if hi == lo:
+        hi = lo + timedelta(minutes=1) - timedelta(microseconds=1)
+    return lo, hi
 
 
 def _next_step_schedule_utc(campaign: Campaign, step: SequenceStep, base_utc: datetime) -> datetime:
-    tz_name = campaign.timezone or "UTC"
-    base_local = base_utc.astimezone(ZoneInfo(tz_name))
-    candidate_local = _parse_send_time(step.send_time, tz_name)
-    candidate_local = candidate_local + timedelta(days=max(step.wait_days, 0))
+    """
+    Earliest UTC time >= base_utc on an allowed send day, inside [send_time, send_window_end]
+    in the campaign timezone (inclusive end). send_window_end null => same as send_time (one-minute slot).
 
+    Same start/end is not a 24h window; use 00:00 start and 23:59 end for all-day on that date.
+    """
+    tz = ZoneInfo(campaign.timezone or "UTC")
+    base_local = base_utc.astimezone(tz)
+    wait = max(int(step.wait_days or 0), 0)
+    allowed = {str(d).lower() for d in step.send_days} if step.send_days else None
+
+    first_calendar_day = base_local.date() + timedelta(days=wait)
+
+    for day_offset in range(0, 56):
+        d = first_calendar_day + timedelta(days=day_offset)
+        if allowed and d.strftime("%A").lower() not in allowed:
+            continue
+
+        bounds = _send_window_bounds_on_date(step, tz, d)
+        if bounds is None:
+            lo = datetime.combine(d, dt_time(0, 0), tzinfo=tz)
+            hi = datetime.combine(d, dt_time(23, 59, 59), tzinfo=tz)
+        else:
+            lo, hi = bounds
+
+        cand = max(lo, base_local)
+        if cand <= hi:
+            return cand.astimezone(timezone.utc)
+
+    return base_utc
+
+
+def _is_within_step_send_window(campaign: Campaign, step: SequenceStep, when_utc: datetime) -> bool:
+    """True if when_utc falls on an allowed send day and inside the step's local send window."""
+    tz = ZoneInfo(campaign.timezone or "UTC")
+    local = when_utc.astimezone(tz)
     if step.send_days:
-        allowed = {str(d).lower() for d in step.send_days}
-        for _ in range(14):
-            if candidate_local.strftime("%A").lower() in allowed:
-                break
-            candidate_local = candidate_local + timedelta(days=1)
-
-    if candidate_local < base_local:
-        candidate_local = base_local
-    return candidate_local.astimezone(timezone.utc)
+        allowed = {str(x).lower() for x in step.send_days}
+        if local.strftime("%A").lower() not in allowed:
+            return False
+    bounds = _send_window_bounds_on_date(step, tz, local.date())
+    if bounds is None:
+        return True
+    lo, hi = bounds
+    return lo <= local <= hi
 
 
 def _pick_step_variant(step_id: str, db: Session) -> StepEmail | None:
@@ -140,6 +533,35 @@ def _append_tracking_pixel(html_body: str, sent_event_id: str) -> str:
     return f"{html_body}\n{pixel_tag}"
 
 
+_HREF_HTTP_RE = re.compile(
+    r'(?P<prefix>\bhref\s*=\s*)(?P<q>["\'])(?P<url>https?://[^"\']+)(?P=q)',
+    re.IGNORECASE,
+)
+
+
+def _rewrite_html_links_for_click_tracking(html: str, sent_event_id: str) -> str:
+    """
+    Wrap external http(s) anchors in signed /track/click/{sent_event_id} URLs so
+    clicks become EmailEvent('clicked') rows. Skips mailto/tel/javascript and
+    URLs that are already tracking links.
+    """
+    if not html or not sent_event_id:
+        return html
+
+    def repl(m: re.Match[str]) -> str:
+        q = m.group("q")
+        url = m.group("url")
+        low = url.lower()
+        if low.startswith(("mailto:", "tel:", "javascript:")):
+            return m.group(0)
+        if "/track/click/" in low or "/track/open/" in low:
+            return m.group(0)
+        tracked = build_tracked_click_url(sent_event_id, url)
+        return f'{m.group("prefix")}{q}{tracked}{q}'
+
+    return _HREF_HTTP_RE.sub(repl, html)
+
+
 def build_tracked_click_url(sent_event_id: str, target_url: str) -> str:
     sig = sign_click_target(sent_event_id, target_url)
     from urllib.parse import quote
@@ -147,18 +569,34 @@ def build_tracked_click_url(sent_event_id: str, target_url: str) -> str:
     return f"{TRACKING_BASE_URL}/track/click/{sent_event_id}?u={quote(target_url, safe='')}&sig={sig}"
 
 
-def _send_smtp(account: SenderAccount, recipient: str, subject: str, html_body: str, plain_body: str = "") -> str:
+def _send_smtp(
+    account: SenderAccount,
+    recipient: str,
+    subject: str,
+    html_body: str,
+    plain_body: str = "",
+    from_display_name: str | None = None,
+) -> str:
     if not account.smtp_host or not account.smtp_port or not account.app_password:
         raise RuntimeError("Sender account SMTP configuration is incomplete.")
 
     message = EmailMessage()
-    message["From"] = account.email
+    display = (from_display_name or "").strip()
+    message["From"] = (
+        formataddr((display, account.email)) if display else account.email
+    )
     message["To"] = recipient
     message["Subject"] = subject
     message.set_content(plain_body or "This email contains HTML content.")
     message.add_alternative(html_body, subtype="html")
     message_id = message["Message-ID"] or f"<{uuid.uuid4()}@campaignpulse.local>"
     message["Message-ID"] = message_id
+    # Normal-priority + client-like headers (applies to campaign and warmup SMTP).
+    message["X-Priority"] = "3"
+    message["X-Mailer"] = "Mozilla Thunderbird 115.6.0"
+    message["User-Agent"] = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Thunderbird/115.6.0"
+    )
 
     try:
         if int(account.smtp_port) == 465:
@@ -179,9 +617,21 @@ def _send_smtp(account: SenderAccount, recipient: str, subject: str, html_body: 
     return message_id
 
 
-def claim_queued_leads(batch_size: int, db: Session) -> list[tuple[str, str]]:
+def claim_queued_leads(
+    batch_size: int,
+    db: Session,
+    *,
+    workspace_id: str | None = None,
+) -> list[tuple[str, str]]:
+    """
+    Claim due queued leads for sending.
+
+    When ``workspace_id`` is set (manual ``run-send-once``), only that workspace
+    is considered. When omitted (background ``sending_loop``), any workspace may
+    be claimed.
+    """
     now = datetime.now(timezone.utc)
-    leads = (
+    q = (
         db.query(Lead)
         .join(Campaign, Campaign.campaign_id == Lead.campaign_id)
         .filter(
@@ -191,7 +641,11 @@ def claim_queued_leads(batch_size: int, db: Session) -> list[tuple[str, str]]:
             Lead.next_scheduled_at.isnot(None),
             Lead.next_scheduled_at <= now,
         )
-        .order_by(Lead.next_scheduled_at.asc())
+    )
+    if workspace_id is not None:
+        q = q.filter(Campaign.workspace_id == workspace_id)
+    leads = (
+        q.order_by(Lead.next_scheduled_at.asc())
         .with_for_update(skip_locked=True)
         .limit(batch_size)
         .all()
@@ -275,6 +729,14 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
         db.commit()
         return
 
+    if not _is_within_step_send_window(lead.campaign, current_step, now):
+        lead.delivery_state = "queued"
+        lead.lock_token = None
+        lead.locked_at = None
+        lead.next_scheduled_at = _next_step_schedule_utc(lead.campaign, current_step, now)
+        db.commit()
+        return
+
     variant = _pick_step_variant(current_step.step_id, db)
     if not variant:
         lead.delivery_state = "failed"
@@ -296,15 +758,39 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
     merge_context = _build_merge_context(lead)
     rendered_subject = _render_merge_tags(variant.subject_line, merge_context)
     rendered_html_body = _render_merge_tags(variant.email_body, merge_context)
-    html_body = _append_tracking_pixel(rendered_html_body, sent_event_id)
+
+    campaign = lead.campaign
+    tracking_on = bool(getattr(campaign, "open_tracking_enabled", True))
+    if tracking_on:
+        html_body = _rewrite_html_links_for_click_tracking(rendered_html_body, sent_event_id)
+        html_body = _append_tracking_pixel(html_body, sent_event_id)
+    else:
+        html_body = rendered_html_body
+
+    sent_row = EmailEvent(
+        event_id=sent_event_id,
+        lead_id=lead.lead_id,
+        step_id=current_step.step_id,
+        event_type="sent",
+        event_scope="lead",
+        sender_account_id=sender.account_id,
+        occurred_at=now,
+        event_metadata={},
+    )
+    db.add(sent_row)
+    db.flush()
+
     try:
         message_id = _send_smtp(
             account=sender,
             recipient=lead.email,
             subject=rendered_subject,
             html_body=html_body,
+            from_display_name=variant.from_name,
         )
     except Exception as exc:
+        db.delete(sent_row)
+        db.flush()
         lead.delivery_state = "failed"
         lead.lock_token = None
         lead.locked_at = None
@@ -322,18 +808,7 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
         db.commit()
         return
 
-    db.add(
-        EmailEvent(
-            event_id=sent_event_id,
-            lead_id=lead.lead_id,
-            step_id=current_step.step_id,
-            event_type="sent",
-            event_scope="lead",
-            sender_account_id=sender.account_id,
-            occurred_at=now,
-            event_metadata={"message_id": message_id},
-        )
-    )
+    sent_row.event_metadata = {"message_id": message_id}
     sender.sent_count_today = int(sender.sent_count_today or 0) + 1
     sender.last_used_at = now
 
@@ -353,80 +828,84 @@ def process_claimed_lead(lead_id: str, lock_token: str, db: Session) -> None:
 
 
 def run_warmup_iteration(db: Session) -> int:
-    accounts = (
-        db.query(SenderAccount)
-        .options(joinedload(SenderAccount.warmup_settings))
-        .filter(
-            SenderAccount.status.in_(("active", "warming_up")),
-            SenderAccount.deleted_at.is_(None),
-            SenderAccount.is_verified.is_(True),
-            SenderAccount.smtp_host.isnot(None),
-            SenderAccount.smtp_port.isnot(None),
-            SenderAccount.app_password.isnot(None),
-        )
-        .all()
-    )
-
-    by_workspace: dict[str, list[SenderAccount]] = {}
-    for acc in accounts:
-        if not acc.warmup_settings or not acc.warmup_settings.is_warmup_active:
-            continue
-        by_workspace.setdefault(acc.workspace_id, []).append(acc)
+    warmup_pool = load_global_warmup_pool(db)
+    peer_emails_lower = global_warmup_peer_emails_lower(warmup_pool)
+    order = list(warmup_pool)
+    random.shuffle(order)
 
     sent = 0
     now = datetime.now(timezone.utc)
-    for workspace_accounts in by_workspace.values():
-        if len(workspace_accounts) < 2:
-            continue
-        for idx, sender in enumerate(workspace_accounts):
-            recipient = workspace_accounts[(idx + 1) % len(workspace_accounts)]
-            if sender.sent_count_today >= _effective_daily_limit(sender):
-                continue
-            thread_id = str(uuid.uuid4())
-            try:
-                message_id = _send_smtp(
-                    account=sender,
-                    recipient=recipient.email,
-                    subject="Warmup connection",
-                    html_body="<p>Warmup check-in message.</p>",
-                    plain_body="Warmup check-in message.",
-                )
-            except Exception as exc:
-                db.add(
-                    EmailEvent(
-                        event_scope="warmup",
-                        event_type="failed",
-                        sender_account_id=sender.account_id,
-                        recipient_account_id=recipient.account_id,
-                        warmup_thread_id=thread_id,
-                        occurred_at=now,
-                        event_metadata={"error": str(exc)},
-                    )
-                )
-                continue
+    n = len(order)
+    if n < 2:
+        db.commit()
+        return sent
 
+    for i, sender in enumerate(order):
+        recipient = order[(i + 1) % n]
+        if (sender.email or "").lower() == (recipient.email or "").lower():
+            continue
+        if sender.sent_count_today >= _effective_daily_limit(sender):
+            continue
+        time.sleep(random.uniform(5.0, 15.0))
+        _imap_rescue_warmup_spam_to_inbox(recipient, peer_emails_lower)
+        subject, html_body, plain_body = _pick_warmup_message()
+        thread_id = str(uuid.uuid4())
+        try:
+            message_id = _send_smtp(
+                account=sender,
+                recipient=recipient.email,
+                subject=subject,
+                html_body=html_body,
+                plain_body=plain_body,
+            )
+        except Exception as exc:
             db.add(
                 EmailEvent(
                     event_scope="warmup",
-                    event_type="sent",
+                    event_type="failed",
                     sender_account_id=sender.account_id,
                     recipient_account_id=recipient.account_id,
                     warmup_thread_id=thread_id,
                     occurred_at=now,
-                    event_metadata={"message_id": message_id},
+                    event_metadata={"error": str(exc)},
                 )
             )
-            sender.sent_count_today = int(sender.sent_count_today or 0) + 1
-            sender.last_used_at = now
-            sent += 1
+            continue
+
+        db.add(
+            EmailEvent(
+                event_scope="warmup",
+                event_type="sent",
+                sender_account_id=sender.account_id,
+                recipient_account_id=recipient.account_id,
+                warmup_thread_id=thread_id,
+                occurred_at=now,
+                event_metadata={"message_id": message_id},
+            )
+        )
+        sender.sent_count_today = int(sender.sent_count_today or 0) + 1
+        sender.last_used_at = now
+        sent += 1
+        _imap_rescue_warmup_spam_to_inbox(recipient, peer_emails_lower)
     db.commit()
     return sent
 
 
 def run_imap_reply_iteration(db: Session) -> int:
-    processed = 0
+    """
+    Warmup-only IMAP pass: move mis-filed warmup mail from Spam/Junk back to INBOX.
+
+    Lead reply detection and Unibox persistence live exclusively in
+    ``ingestion_service`` (header prefetch + RFC822 for matching leads). A second
+    inbox scan here previously duplicated reply ``EmailEvent`` rows without
+    always inserting ``UniboxMessage`` rows (stale ORM ``last_imap_uid`` on the
+    API session after parallel ingest, and lighter FROM-only parsing).
+    """
+    warmup_pool = load_global_warmup_pool(db)
+    warmup_peer_emails_lower = global_warmup_peer_emails_lower(warmup_pool)
     accounts = (
         db.query(SenderAccount)
+        .options(joinedload(SenderAccount.warmup_settings))
         .filter(
             SenderAccount.imap_host.isnot(None),
             SenderAccount.imap_port.isnot(None),
@@ -438,60 +917,15 @@ def run_imap_reply_iteration(db: Session) -> int:
     )
     for account in accounts:
         try:
-            with imaplib.IMAP4_SSL(account.imap_host, int(account.imap_port)) as client:
+            with imaplib.IMAP4_SSL(
+                account.imap_host, int(account.imap_port), timeout=IMAP_SOCKET_TIMEOUT
+            ) as client:
                 client.login(account.email, account.app_password)
-                client.select("INBOX")
-                start_uid = int(account.last_imap_uid or 0) + 1
-                status_value, data = client.uid("SEARCH", None, f"UID {start_uid}:*")
-                if status_value != "OK":
-                    continue
-                uid_values = [u.decode("utf-8") for u in (data[0] or b"").split()][: int(account.max_imap_fetch or 100)]
-                max_seen_uid = int(account.last_imap_uid or 0)
-                for uid in uid_values:
-                    status_fetch, msg_data = client.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (FROM)])")
-                    if status_fetch != "OK" or not msg_data:
-                        continue
-                    header_bytes = msg_data[0][1] if isinstance(msg_data[0], tuple) else b""
-                    header_text = header_bytes.decode("utf-8", errors="ignore")
-                    from_email = parseaddr(header_text.replace("From:", "").strip())[1].lower()
-                    if not from_email:
-                        continue
-
-                    lead = (
-                        db.query(Lead)
-                        .join(EmailEvent, EmailEvent.lead_id == Lead.lead_id)
-                        .filter(
-                            func.lower(Lead.email) == from_email,
-                            EmailEvent.event_type == "sent",
-                            EmailEvent.sender_account_id == account.account_id,
-                        )
-                        .order_by(EmailEvent.occurred_at.desc())
-                        .first()
-                    )
-                    if not lead:
-                        max_seen_uid = max(max_seen_uid, int(uid))
-                        continue
-
-                    db.add(
-                        EmailEvent(
-                            lead_id=lead.lead_id,
-                            event_type="replied",
-                            event_scope="lead",
-                            sender_account_id=account.account_id,
-                            occurred_at=datetime.now(timezone.utc),
-                            event_metadata={"imap_uid": uid},
-                        )
-                    )
-                    lead.lead_status = "replied"
-                    lead.delivery_state = "paused"
-                    max_seen_uid = max(max_seen_uid, int(uid))
-                    processed += 1
-
-                account.last_imap_uid = max_seen_uid or account.last_imap_uid
-                db.commit()
+                if account.warmup_settings and account.warmup_settings.is_warmup_active:
+                    _imap_rescue_warmup_spam_on_client(client, account, warmup_peer_emails_lower)
+            db.commit()
         except Exception:
-            # Robust polling loop: skip account-level IMAP failures and continue.
             db.rollback()
             continue
-    return processed
+    return 0
 

@@ -140,6 +140,15 @@ def test_delete_nonexistent_lead(client, db, owner, ws, campaign):
     assert res.status_code == 404
 
 
+def test_analyst_cannot_delete_lead(client, db, analyst, ws, campaign):
+    lead = make_lead(db, campaign.campaign_id)
+    res = client.delete(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/leads/{lead.lead_id}",
+        cookies=auth_cookies(analyst),
+    )
+    assert res.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # CSV import
 # ---------------------------------------------------------------------------

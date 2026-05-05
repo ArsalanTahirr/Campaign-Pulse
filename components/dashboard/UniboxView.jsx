@@ -9,13 +9,16 @@ import {
   Clock3,
   Inbox,
   Loader2,
+  Mail,
   MailOpen,
   Search,
   Send,
   Tag,
   UserX,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
+import PermissionGate from "@/components/ui/PermissionGate";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -49,14 +52,128 @@ function timeAgo(isoString) {
   return new Date(isoString).toLocaleDateString();
 }
 
+/** GET /workspaces/{id}/campaigns returns CampaignOut: field is `name`, not `campaign_name`. */
+function campaignListLabel(c) {
+  if (!c) return "";
+  return c.name ?? c.campaign_name ?? "";
+}
+
 function selectionTitle(selection, campaigns, inboxes) {
   if (selection.type === "pipeline")
     return pipelineStatuses.find((s) => s.id === selection.id)?.label || "Pipeline";
   if (selection.type === "campaign")
-    return campaigns.find((c) => c.campaign_id === selection.id)?.campaign_name || "Campaign";
+    return campaignListLabel(campaigns.find((c) => c.campaign_id === selection.id)) || "Campaign";
   if (selection.type === "inbox")
     return inboxes.find((i) => i.inbox_id === selection.id)?.email || "Inbox";
   return moreOptions.find((o) => o.id === selection.id)?.label || "More";
+}
+
+function formatApiError(body) {
+  const d = body?.detail;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d)) {
+    return d
+      .map((x) => (typeof x === "object" && x?.msg ? x.msg : String(x)))
+      .filter(Boolean)
+      .join("; ");
+  }
+  return "Something went wrong.";
+}
+
+function mergeThreadFromPatchOut(prev, out, campaigns) {
+  const campaignName = out.campaign_id
+    ? campaignListLabel(campaigns.find((c) => c.campaign_id === out.campaign_id)) || null
+    : null;
+  return {
+    ...prev,
+    campaign_id: out.campaign_id,
+    campaign_name: campaignName,
+    pipeline_status: out.pipeline_status,
+    lead: prev.lead
+      ? { ...prev.lead, pipeline_status: out.pipeline_status ?? prev.lead.pipeline_status }
+      : prev.lead,
+  };
+}
+
+function ThreadMetadataControls({
+  workspaceId,
+  thread,
+  campaigns,
+  metaPatching,
+  setMetaPatching,
+  onThreadUpdated,
+  interactionLocked,
+}) {
+  const pipelineValue =
+    thread.lead?.pipeline_status || thread.pipeline_status || "lead";
+  const campaignValue = thread.campaign_id || "";
+  const selectClass =
+    "max-w-[160px] truncate rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-300 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
+
+  const patchThreadMeta = async (body) => {
+    if (interactionLocked || metaPatching || !workspaceId) return;
+    setMetaPatching(true);
+    try {
+      const r = await fetch(
+        `${API}/workspaces/${workspaceId}/unibox/threads/${thread.thread_id}`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+      const payload = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast.error(formatApiError(payload));
+        return;
+      }
+      onThreadUpdated((prev) => mergeThreadFromPatchOut(prev, payload, campaigns));
+    } catch {
+      toast.error("Could not update thread.");
+    } finally {
+      setMetaPatching(false);
+    }
+  };
+
+  const pipelineDisabled =
+    interactionLocked || metaPatching || thread.is_orphan || !thread.lead;
+  const campaignDisabled = interactionLocked || metaPatching;
+
+  return (
+    <>
+      <select
+        aria-label="Pipeline status"
+        className={selectClass}
+        disabled={pipelineDisabled}
+        value={pipelineValue}
+        onChange={(e) => patchThreadMeta({ pipeline_status: e.target.value })}
+      >
+        {pipelineStatuses.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.label}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Campaign tag"
+        className={selectClass}
+        disabled={campaignDisabled}
+        value={campaignValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          patchThreadMeta({ campaign_id: v === "" ? null : v });
+        }}
+      >
+        <option value="">No campaign</option>
+        {campaigns.map((c) => (
+          <option key={c.campaign_id} value={c.campaign_id}>
+            {campaignListLabel(c)}
+          </option>
+        ))}
+      </select>
+    </>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +263,15 @@ function ThreadCard({ thread, onClick }) {
   );
 }
 
-function ThreadDetail({ thread, inboxes, onBack, onReplySent }) {
+function ThreadDetail({
+  workspaceId,
+  thread,
+  campaigns,
+  inboxes,
+  onBack,
+  onReplySent,
+  onThreadUpdated,
+}) {
   const colorByDirection = {
     outbound: "bg-blue-50 border-blue-100",
     inbound:  "bg-white border-slate-200",
@@ -157,6 +282,8 @@ function ThreadDetail({ thread, inboxes, onBack, onReplySent }) {
   };
 
   const messagesEndRef = useRef(null);
+  const [metaPatching, setMetaPatching] = useState(false);
+  const [readTogglingId, setReadTogglingId] = useState(null);
 
   // Reply state
   const [replyBody,    setReplyBody]    = useState("");
@@ -164,6 +291,8 @@ function ThreadDetail({ thread, inboxes, onBack, onReplySent }) {
   const [isSending,    setIsSending]    = useState(false);
   const [replyError,   setReplyError]   = useState("");
   const [replySent,    setReplySent]    = useState(false);
+
+  const readBusy = readTogglingId !== null;
 
   // Auto-select first inbox when inboxes load
   useEffect(() => {
@@ -175,15 +304,48 @@ function ThreadDetail({ thread, inboxes, onBack, onReplySent }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [thread.messages]);
 
+  const toggleInboundRead = async (msg) => {
+    if (!workspaceId || readBusy) return;
+    const nextRead = !msg.is_read;
+    setReadTogglingId(msg.message_id);
+    try {
+      const r = await fetch(
+        `${API}/workspaces/${workspaceId}/unibox/threads/${thread.thread_id}/messages/${msg.message_id}/read`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_read: nextRead }),
+        }
+      );
+      const payload = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast.error(formatApiError(payload));
+        return;
+      }
+      onThreadUpdated((prev) => ({
+        ...prev,
+        messages: prev.messages.map((m) =>
+          m.message_id === msg.message_id ? { ...m, is_read: payload.is_read } : m
+        ),
+      }));
+    } catch {
+      toast.error("Could not update read state.");
+    } finally {
+      setReadTogglingId(null);
+    }
+  };
+
   const handleSend = async () => {
     if (!replyBody.trim()) { setReplyError("Reply body cannot be empty."); return; }
     if (!fromAccountId)    { setReplyError("Please select a sender inbox."); return; }
+    if (!workspaceId)      { setReplyError("No workspace selected."); return; }
     setIsSending(true);
     setReplyError("");
     setReplySent(false);
     try {
       const r = await fetch(
-        `${API}/workspaces/${thread.workspace_id}/unibox/threads/${thread.thread_id}/reply`,
+        `${API}/workspaces/${workspaceId}/unibox/threads/${thread.thread_id}/reply`,
         {
           method: "POST",
           credentials: "include",
@@ -207,6 +369,15 @@ function ThreadDetail({ thread, inboxes, onBack, onReplySent }) {
     }
   };
 
+  const metaProps = {
+    workspaceId,
+    thread,
+    campaigns,
+    metaPatching,
+    setMetaPatching,
+    onThreadUpdated,
+  };
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -220,7 +391,7 @@ function ThreadDetail({ thread, inboxes, onBack, onReplySent }) {
         </button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900">{thread.subject}</p>
-          <div className="mt-1 flex items-center gap-2">
+          <div className="mt-1 flex flex-wrap items-center gap-2">
             {thread.pipeline_status && <PipelineBadge status={thread.pipeline_status} />}
             {thread.campaign_name && (
               <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
@@ -234,6 +405,14 @@ function ThreadDetail({ thread, inboxes, onBack, onReplySent }) {
                 Unknown sender
               </span>
             )}
+            <PermissionGate
+              action="manage_leads"
+              fallback={
+                <ThreadMetadataControls {...metaProps} interactionLocked />
+              }
+            >
+              <ThreadMetadataControls {...metaProps} interactionLocked={false} />
+            </PermissionGate>
           </div>
         </div>
       </div>
@@ -254,10 +433,31 @@ function ThreadDetail({ thread, inboxes, onBack, onReplySent }) {
               <p className="whitespace-pre-wrap text-sm text-slate-700">
                 {msg.body_text || "(No plain-text body)"}
               </p>
-              {!msg.is_read && msg.direction === "inbound" && (
-                <span className="mt-2 inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-600">
-                  Unread
-                </span>
+              {msg.direction === "inbound" && (
+                <div className="mt-2 flex items-center gap-2">
+                  {!msg.is_read && (
+                    <span className="inline-block rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-600">
+                      Unread
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={msg.is_read ? "Mark as unread" : "Mark as read"}
+                    title={msg.is_read ? "Mark as unread" : "Mark as read"}
+                    disabled={readBusy}
+                    onClick={() => toggleInboundRead(msg)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {readTogglingId === msg.message_id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : msg.is_read ? (
+                      <Mail className="h-3.5 w-3.5" />
+                    ) : (
+                      <MailOpen className="h-3.5 w-3.5" />
+                    )}
+                    {msg.is_read ? "Unread" : "Read"}
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -398,7 +598,7 @@ export default function UniboxView() {
 
     fetch(`${API}/workspaces/${workspaceId}/campaigns`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
-      .then(setCampaigns)
+      .then((data) => setCampaigns(Array.isArray(data) ? data : []))
       .catch(() => {});
 
     fetch(`${API}/workspaces/${workspaceId}/unibox/inboxes`, { credentials: "include" })
@@ -487,7 +687,9 @@ export default function UniboxView() {
 
   const filteredCampaigns = useMemo(() => {
     const q = campaignSearch.trim().toLowerCase();
-    return q ? campaigns.filter((c) => c.campaign_name.toLowerCase().includes(q)) : campaigns;
+    return q
+      ? campaigns.filter((c) => campaignListLabel(c).toLowerCase().includes(q))
+      : campaigns;
   }, [campaignSearch, campaigns]);
 
   const filteredInboxes = useMemo(() => {
@@ -547,10 +749,13 @@ export default function UniboxView() {
     if (threadDetail) {
       return (
         <ThreadDetail
+          workspaceId={workspaceId}
           thread={threadDetail}
+          campaigns={campaigns}
           inboxes={inboxes}
           onBack={() => setThreadDetail(null)}
           onReplySent={() => openThread(threadDetail)}
+          onThreadUpdated={(fn) => setThreadDetail((prev) => (prev ? fn(prev) : prev))}
         />
       );
     }
@@ -716,7 +921,7 @@ export default function UniboxView() {
                               isActive ? "bg-blue-50 text-blue-600" : "text-slate-700 hover:bg-slate-50"
                             }`}
                           >
-                            <span className="truncate">{c.campaign_name}</span>
+                            <span className="truncate">{campaignListLabel(c)}</span>
                           </button>
                         );
                       })

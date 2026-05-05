@@ -10,7 +10,7 @@ All count values are integers.
 """
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, Optional
 
 from sqlalchemy import func, text, distinct, select, tuple_
 from sqlalchemy.orm import Session
@@ -45,6 +45,59 @@ def _campaign_ids_for_workspace(workspace_id: str, db: Session) -> list[str]:
     return [r[0] for r in rows]
 
 
+def _db_statuses_for_api_filter(api_status: Optional[str]) -> Optional[list[str]]:
+    """
+    Map a single dashboard filter token to DB Campaign.status values.
+    None / 'all' → no extra status filter.
+    """
+    if not api_status or str(api_status).lower() in ("all", ""):
+        return None
+    key = str(api_status).lower().strip()
+    if key == "completed":
+        return ["completed", "archived", "deleted"]
+    if key in ("active", "paused", "draft", "scheduled"):
+        return [key]
+    return None
+
+
+def _workspace_campaign_ids_filtered(
+    workspace_id: str,
+    db: Session,
+    *,
+    campaign_statuses: Optional[list[str]] = None,
+) -> list[str]:
+    """Campaign ids in workspace, optionally restricted by Campaign.status."""
+    q = db.query(Campaign.campaign_id).filter(Campaign.workspace_id == workspace_id)
+    if campaign_statuses:
+        q = q.filter(Campaign.status.in_(campaign_statuses))
+    return [r[0] for r in q.all()]
+
+
+def _scoped_campaign_ids(
+    workspace_id: str,
+    db: Session,
+    campaign_id: Optional[str],
+    *,
+    campaign_statuses: Optional[list[str]] = None,
+) -> list[str]:
+    """Workspace campaigns (optionally status-scoped), or one id if it matches scope."""
+    all_ids = _workspace_campaign_ids_filtered(
+        workspace_id, db, campaign_statuses=campaign_statuses
+    )
+    if not campaign_id:
+        return all_ids
+    return [campaign_id] if campaign_id in all_ids else []
+
+
+def _apply_occurred_at_filters(q, date_from: Optional[datetime], date_to: Optional[datetime]):
+    """Restrict EmailEvent rows to [date_from, date_to] on occurred_at (inclusive)."""
+    if date_from is not None:
+        q = q.filter(EmailEvent.occurred_at >= date_from)
+    if date_to is not None:
+        q = q.filter(EmailEvent.occurred_at <= date_to)
+    return q
+
+
 def _normalize_campaign_status(db_status: str) -> Literal["active", "completed"]:
     """
     Map the full set of DB campaign status values to the two values the
@@ -60,14 +113,30 @@ def _normalize_campaign_status(db_status: str) -> Literal["active", "completed"]
 # ---------------------------------------------------------------------------
 
 
-def get_global_summary(workspace_id: str, db: Session) -> dict:
+def get_global_summary(
+    workspace_id: str,
+    db: Session,
+    *,
+    campaign_id: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    campaign_status: Optional[str] = None,
+) -> dict:
     """
     Return total_sent, open_rate, click_rate, reply_rate aggregated across
     all campaigns in the workspace.
 
     Delivered = total sent emails minus leads that bounced at least once.
+
+    Optional filters (industry-standard dashboard scope):
+      * campaign_id — restrict to one campaign in the workspace
+      * date_from / date_to — inclusive bounds on EmailEvent.occurred_at (UTC)
+      * campaign_status — all | active | paused | completed (completed includes archived/deleted)
     """
-    campaign_ids = _campaign_ids_for_workspace(workspace_id, db)
+    st = _db_statuses_for_api_filter(campaign_status)
+    campaign_ids = _scoped_campaign_ids(
+        workspace_id, db, campaign_id, campaign_statuses=st
+    )
 
     if not campaign_ids:
         return {
@@ -77,13 +146,15 @@ def get_global_summary(workspace_id: str, db: Session) -> dict:
             "reply_rate": 0.0,
         }
 
-    base = (
+    base = _apply_occurred_at_filters(
         db.query(EmailEvent)
         .join(Lead, Lead.lead_id == EmailEvent.lead_id)
         .filter(
             Lead.campaign_id.in_(campaign_ids),
             EmailEvent.event_scope == "lead",
-        )
+        ),
+        date_from,
+        date_to,
     )
 
     total_sent: int = (
@@ -96,7 +167,7 @@ def get_global_summary(workspace_id: str, db: Session) -> dict:
         .scalar() or 0
     )
 
-    total_delivered: int = total_sent - total_bounced
+    total_delivered: int = max(0, total_sent - total_bounced)
 
     unique_opens: int = (
         base.filter(EmailEvent.event_type == "opened")
@@ -105,7 +176,7 @@ def get_global_summary(workspace_id: str, db: Session) -> dict:
     )
 
     # Unique clicks: count each (lead, campaign) pair once per spec.
-    unique_clicks: int = (
+    clicks_q = (
         db.query(
             func.count(
                 distinct(tuple_(EmailEvent.lead_id, Lead.campaign_id))
@@ -117,8 +188,9 @@ def get_global_summary(workspace_id: str, db: Session) -> dict:
             EmailEvent.event_scope == "lead",
             EmailEvent.event_type == "clicked",
         )
-        .scalar() or 0
     )
+    clicks_q = _apply_occurred_at_filters(clicks_q, date_from, date_to)
+    unique_clicks: int = clicks_q.scalar() or 0
 
     unique_replies: int = (
         base.filter(EmailEvent.event_type == "replied")
@@ -143,14 +215,24 @@ def get_graph_data(
     workspace_id: str,
     granularity: Literal["daily", "weekly", "monthly"],
     db: Session,
+    *,
+    campaign_id: Optional[str] = None,
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    campaign_status: Optional[str] = None,
 ) -> dict:
     """
     Return time-bucketed series data for the four required metrics.
 
     Returns empty value arrays (not errors) when no data exists.
+
+    Optional campaign_id, date_from/date_to, and campaign_status match get_global_summary.
     """
     trunc_unit = _GRANULARITY_TRUNC.get(granularity, "day")
-    campaign_ids = _campaign_ids_for_workspace(workspace_id, db)
+    st = _db_statuses_for_api_filter(campaign_status)
+    campaign_ids = _scoped_campaign_ids(
+        workspace_id, db, campaign_id, campaign_statuses=st
+    )
 
     if not campaign_ids:
         return {
@@ -167,7 +249,7 @@ def get_graph_data(
 
     bucket_col = func.date_trunc(trunc_unit, EmailEvent.occurred_at).label("bucket")
 
-    rows = (
+    rows = _apply_occurred_at_filters(
         db.query(
             bucket_col,
             EmailEvent.event_type,
@@ -178,10 +260,10 @@ def get_graph_data(
         .filter(
             Lead.campaign_id.in_(campaign_ids),
             EmailEvent.event_scope == "lead",
-        )
-        .order_by(bucket_col)
-        .all()
-    )
+        ),
+        date_from,
+        date_to,
+    ).order_by(bucket_col).all()
 
     if not rows:
         return {
@@ -254,7 +336,7 @@ def get_graph_data(
     for lbl in labels:
         sent = bucket_sent.get(lbl, 0)
         bounced = len(bucket_bounced.get(lbl, set()))
-        delivered = sent - bounced
+        delivered = max(0, sent - bounced)
         opens = len(bucket_opens.get(lbl, set()))
         clicks = len(bucket_clicks.get(lbl, set()))
         replies = len(bucket_replies.get(lbl, set()))
@@ -455,6 +537,7 @@ def get_campaign_analytics(workspace_id: str, db: Session) -> dict:
             "campaign_id": cid,
             "campaign_name": campaign.campaign_name,
             "status": _normalize_campaign_status(campaign.status),
+            "lifecycle": campaign.status or "draft",
             "sequence_started": sequence_started,
             "opened": opened,
             "replied": {

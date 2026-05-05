@@ -664,7 +664,7 @@ class Campaign(Base):
     days live on SequenceStep rows, not on the campaign.
 
     The schedule JSONB column is legacy and unused by the public API; new data
-    should rely on step-level send_time / send_days only.
+    should rely on step-level send_time / send_window_end / send_days only.
 
     One campaign contains many SequenceSteps (the email templates) and many
     Leads (the recipients).
@@ -728,15 +728,15 @@ class Campaign(Base):
         comment="Legacy campaign schedule JSONB (unused by API; use sequence_step.send_days).",
     )
 
-    # Controls whether open-tracking pixels are injected into outbound emails
-    # for this campaign.  When False, open events will not be recorded and the
-    # analytics layer returns opened: 0 with tracking_enabled: false.
+    # When True: outbound HTML gets an open pixel plus http(s) links rewritten to
+    # signed /track/click URLs. When False: no pixel, links unchanged; analytics
+    # treats opens as disabled (opened: 0, tracking_enabled: false on account rows).
     open_tracking_enabled = Column(
         Boolean,
         nullable=False,
         default=True,
         server_default=text("true"),
-        comment="When False, open-tracking pixels are not injected and opens are not recorded.",
+        comment="When False, no open pixel and no click-link wrapping for this campaign.",
     )
 
     created_at = Column(
@@ -887,11 +887,17 @@ class SequenceStep(Base):
         comment="Days to wait after the previous step before sending this email.",
     )
 
-    # Local send time in the parent campaign's timezone. Format: 'HH:MM' (24-hour).
+    # Local send window in the parent campaign's timezone. Format: 'HH:MM' (24-hour).
     send_time = Column(
         String(5),
         nullable=True,
-        comment="Step send time (HH:MM, 24-hour) in campaign timezone.",
+        comment="Start of daily send window (HH:MM, 24-hour) in campaign timezone.",
+    )
+
+    send_window_end = Column(
+        String(5),
+        nullable=True,
+        comment="End of daily send window (HH:MM); null = same instant as send_time (legacy).",
     )
 
     # JSON array of weekday strings, e.g. ["Monday", "Wednesday", "Friday"].
@@ -1052,6 +1058,13 @@ class Lead(Base):
         ForeignKey("lead_import_session.session_id", ondelete="SET NULL"),
         nullable=True,
         comment="FK to lead_import_session — NULL for manually added leads.",
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=_NOW_DEFAULT,
+        comment="UTC timestamp when this lead row was created (import or manual add).",
     )
 
     # Flags this lead's reply as a high-quality opportunity (e.g. interested

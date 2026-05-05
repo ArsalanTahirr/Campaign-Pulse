@@ -8,10 +8,12 @@ Endpoints
 ─────────
 GET /workspaces/{workspace_id}/analytics/summary
     Global KPIs aggregated across all campaigns in the workspace.
+    Optional: ?campaign_id=&date_from=&date_to= (ISO datetimes, UTC; inclusive).
 
 GET /workspaces/{workspace_id}/analytics/graph
     Time-series data for the four required metrics.
-    Query param: ?granularity=daily|weekly|monthly  (default: monthly)
+    Query params: granularity=daily|weekly|monthly (default monthly),
+    optional campaign_id, date_from, date_to (same as summary).
 
 GET /workspaces/{workspace_id}/analytics/campaigns
     Per-campaign breakdown for all campaigns in the workspace.
@@ -21,6 +23,7 @@ GET /workspaces/{workspace_id}/analytics/account-performance
     Query param: ?campaign_id=<uuid>  (required)
 """
 
+from datetime import datetime
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -43,11 +46,34 @@ router = APIRouter()
 @router.get("/summary", response_model=GlobalSummaryResponse)
 def get_summary(
     workspace_id: str,
+    campaign_id: Optional[str] = Query(
+        default=None,
+        description="When set, KPIs include only this campaign (must belong to the workspace).",
+    ),
+    date_from: Optional[datetime] = Query(
+        default=None,
+        description="Lower bound on EmailEvent.occurred_at (inclusive), UTC.",
+    ),
+    date_to: Optional[datetime] = Query(
+        default=None,
+        description="Upper bound on EmailEvent.occurred_at (inclusive), UTC.",
+    ),
+    campaign_status: Optional[str] = Query(
+        default=None,
+        description="Scope KPIs to campaigns in this lifecycle: all | active | paused | completed.",
+    ),
     _: None = require_permission("view_analytics"),
     db: Session = Depends(get_db),
 ):
     """Global KPIs aggregated across all campaigns in the workspace."""
-    data = analytics_service.get_global_summary(workspace_id, db)
+    data = analytics_service.get_global_summary(
+        workspace_id,
+        db,
+        campaign_id=campaign_id,
+        date_from=date_from,
+        date_to=date_to,
+        campaign_status=campaign_status,
+    )
     return GlobalSummaryResponse(**data)
 
 
@@ -58,6 +84,22 @@ def get_graph(
         default="monthly",
         description="Time bucket granularity: daily | weekly | monthly",
     ),
+    campaign_id: Optional[str] = Query(
+        default=None,
+        description="When set, the graph includes only this campaign.",
+    ),
+    date_from: Optional[datetime] = Query(
+        default=None,
+        description="Lower bound on EmailEvent.occurred_at (inclusive), UTC.",
+    ),
+    date_to: Optional[datetime] = Query(
+        default=None,
+        description="Upper bound on EmailEvent.occurred_at (inclusive), UTC.",
+    ),
+    campaign_status: Optional[str] = Query(
+        default=None,
+        description="Scope the graph to campaigns: all | active | paused | completed.",
+    ),
     _: None = require_permission("view_analytics"),
     db: Session = Depends(get_db),
 ):
@@ -65,7 +107,15 @@ def get_graph(
     Time-series data for Total Emails Sent, Open Rate, Click Rate, Reply Rate.
     Returns exactly 4 series. Returns empty value arrays when no data exists.
     """
-    data = analytics_service.get_graph_data(workspace_id, granularity, db)
+    data = analytics_service.get_graph_data(
+        workspace_id,
+        granularity,
+        db,
+        campaign_id=campaign_id,
+        date_from=date_from,
+        date_to=date_to,
+        campaign_status=campaign_status,
+    )
     return GraphDataResponse.model_validate(data)
 
 

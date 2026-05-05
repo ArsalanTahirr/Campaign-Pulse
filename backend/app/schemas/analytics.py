@@ -74,6 +74,7 @@ class CampaignAnalyticsRow(BaseModel):
     campaign_id: str
     campaign_name: str
     status: Literal["active", "completed"]
+    lifecycle: str
     sequence_started: int
     opened: int
     replied: RepliedStats

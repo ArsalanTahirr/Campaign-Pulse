@@ -40,6 +40,7 @@ const PERMISSION_MATRIX = {
   invite_collaborator:   ["Owner", "Agency"],
   remove_collaborator:   ["Owner", "Agency"],
   change_role:           ["Owner", "Agency"],
+  manage_leads:          ["Owner", "Agency", "Marketing Manager"],
   manage_email_accounts: ["Owner", "Agency", "Marketing Manager"],
   view_workspace:        ["Owner", "Agency", "Marketing Manager", "Data Analyst"],
   edit_workspace:        ["Owner"],
@@ -48,7 +49,8 @@ const PERMISSION_MATRIX = {
 export default function PermissionGate({ action, roles, fallback = null, children }) {
   const { role, loading } = useWorkspace();
 
-  if (loading) return null;
+  // While loading: show fallback when provided so controls can stay visible (e.g. disabled).
+  if (loading) return fallback != null ? fallback : null;
   if (!role) return fallback;
 
   let allowed;

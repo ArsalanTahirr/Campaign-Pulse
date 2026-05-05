@@ -3,23 +3,27 @@ services/unibox/ingestion_service.py — Ingest inbound emails from IMAP into th
 Unibox (UniboxThread + UniboxMessage tables).
 
 This service is called by the extended imap_reply_loop in engine_loops.py once
-per SenderAccount per poll cycle.  It replaces (and supersedes) the lightweight
-FROM-header-only logic previously inside run_imap_reply_iteration — the old path
-still fires EmailEvent('replied') records for campaign tracking, while this new
-path stores full message content for the Unibox.
+per SenderAccount per poll cycle (often in parallel across accounts). It is the
+single source of truth for both Unibox persistence and EmailEvent('replied')
+rows for inbound lead mail.
 
 Responsibilities
 ────────────────
 1. Fetch all new UIDs from the IMAP server (start_uid onwards).
-2. Download the full RFC 822 payload for each UID.
-3. Parse headers (Message-ID, In-Reply-To, References, From, To, CC, Subject,
+2. Batch-fetch small HEADER.FIELDS slices per UID; skip full RFC822 download when
+   From is not a workspace lead (or Message-ID already ingested).
+3. Download full RFC 822 only for candidate lead messages.
+4. Parse headers (Message-ID, In-Reply-To, References, From, To, CC, Subject,
    Date) and body (plain-text and HTML alternatives).
-4. Deduplicate by message_id_header — skip if already ingested.
-5. Resolve lead and campaign by matching From address against Lead.email
+5. Deduplicate by message_id_header — skip if already ingested.
+6. Resolve lead and campaign by matching From address against Lead.email
    within the workspace.
-6. Delegate thread resolution to ThreadingService.
-7. Persist UniboxMessage; build search_vector.
-8. Update SenderAccount.last_imap_uid.
+7. **If From does not match any lead in the workspace, skip persistence** (do not
+   store newsletters, social alerts, etc. in Unibox). The IMAP UID cursor still
+   advances so those messages are not re-fetched forever.
+8. Delegate thread resolution to ThreadingService.
+9. Persist UniboxMessage; build search_vector.
+10. Update SenderAccount.last_imap_uid.
 
 All DB mutations call flush() not commit() — the caller (engine loop) commits
 after each account's batch.
@@ -32,16 +36,19 @@ from __future__ import annotations
 
 import email
 import imaplib
+import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.utils import parseaddr, parsedate_to_datetime
 from typing import Optional
 
 from sqlalchemy import func, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app import repositories
 from app.models import (
+    Campaign,
     EmailEvent,
     Lead,
     SenderAccount,
@@ -50,26 +57,79 @@ from app.models import (
 from app.services.unibox import threading_service
 
 
-def ingest_account(account: SenderAccount, db: Session) -> int:
+def ingest_account(account: SenderAccount, db: Session) -> tuple[int, int]:
     """
     Poll one SenderAccount's IMAP inbox and ingest all new messages.
 
-    Returns the number of new messages ingested (0 if nothing new or on
-    error — errors are swallowed so a single bad account doesn't halt the
-    loop).
+    Returns (messages_ingested, reply_events_recorded). On error returns (0, 0).
     """
     if not _is_imap_configured(account):
-        return 0
+        return 0, 0
 
     try:
-        with imaplib.IMAP4_SSL(account.imap_host, int(account.imap_port)) as client:
+        from app.services import sending_engine_service as _ses
+
+        with imaplib.IMAP4_SSL(
+            account.imap_host, int(account.imap_port), timeout=_ses.IMAP_SOCKET_TIMEOUT
+        ) as client:
             client.login(account.email, account.app_password)
+            if account.warmup_settings and getattr(
+                account.warmup_settings, "is_warmup_active", False
+            ):
+                pool = _ses.load_global_warmup_pool(db)
+                peers = _ses.global_warmup_peer_emails_lower(pool)
+                _ses._imap_rescue_warmup_spam_on_client(client, account, peers)
             client.select("INBOX")
-            ingested = _process_inbox(account, client, db)
-        return ingested
+            ingested, replies = _process_inbox(account, client, db)
+        return ingested, replies
     except Exception:
         db.rollback()
-        return 0
+        return 0, 0
+
+
+_IMAP_ACCOUNT_PARALLEL_MAX = int(os.environ.get("IMAP_ACCOUNT_PARALLEL_MAX", "6"))
+
+
+def ingest_account_by_id(account_id: str) -> tuple[int, int]:
+    """
+    Load a sender by id in a fresh Session and run ingest_account.
+    Used by parallel IMAP workers (each thread must use its own DB session).
+    """
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        acc = (
+            db.query(SenderAccount)
+            .options(joinedload(SenderAccount.warmup_settings))
+            .filter(SenderAccount.account_id == account_id)
+            .first()
+        )
+        if not acc:
+            return 0, 0
+        return ingest_account(acc, db)
+    except Exception:
+        db.rollback()
+        return 0, 0
+    finally:
+        db.close()
+
+
+def ingest_accounts_parallel(account_ids: list[str]) -> tuple[int, int]:
+    """Run ingest_account across many senders with a thread pool (isolated sessions)."""
+    if not account_ids:
+        return 0, 0
+    n_workers = max(1, min(_IMAP_ACCOUNT_PARALLEL_MAX, len(account_ids)))
+    if n_workers == 1:
+        ti, tr = 0, 0
+        for aid in account_ids:
+            i, r = ingest_account_by_id(aid)
+            ti += i
+            tr += r
+        return ti, tr
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        parts = list(pool.map(ingest_account_by_id, account_ids))
+    return sum(p[0] for p in parts), sum(p[1] for p in parts)
 
 
 def _is_imap_configured(account: SenderAccount) -> bool:
@@ -82,25 +142,113 @@ def _is_imap_configured(account: SenderAccount) -> bool:
     )
 
 
+def _workspace_lead_emails_lower(workspace_id: str, db: Session) -> set[str]:
+    """Lowercased lead emails for all campaigns in the workspace (for IMAP pre-filter)."""
+    rows = (
+        db.query(func.lower(Lead.email))
+        .join(Campaign, Campaign.campaign_id == Lead.campaign_id)
+        .filter(Campaign.workspace_id == workspace_id)
+        .distinct()
+        .all()
+    )
+    return {str(em).lower() for (em,) in rows if em}
+
+
+def _message_from_header_fields_bytes(blob: bytes) -> email.message.Message:
+    """Parse IMAP BODY.PEEK[HEADER.FIELDS (...)] payload into a header-only Message."""
+    raw = blob.strip()
+    if not raw:
+        return email.message_from_bytes(b"From: \r\n\r\n")
+    if b"\r\n\r\n" not in raw:
+        raw = raw + b"\r\n\r\n"
+    return email.message_from_bytes(raw)
+
+
+def _from_address_from_header_fetch_blob(blob: bytes) -> str:
+    """
+    Extract the first mailbox address from a HEADER.FIELDS blob, including
+    RFC822 folded ``From:`` continuation lines (some mobile clients use these).
+    """
+    text = blob.decode("utf-8", errors="ignore")
+    lines = text.splitlines()
+    parts: list[str] = []
+    in_from = False
+    for line in lines:
+        if line[:5].lower() == "from:":
+            in_from = True
+            parts.append(line[5:].strip())
+        elif in_from and line and line[0] in " \t":
+            parts.append(line.strip())
+        elif in_from:
+            break
+    if parts:
+        combined = " ".join(parts)
+        return (parseaddr(combined)[1] or "").strip().lower()
+    return (parseaddr(text.replace("From:", "").strip())[1] or "").strip().lower()
+
+
 def _process_inbox(
     account: SenderAccount, client: imaplib.IMAP4_SSL, db: Session
-) -> int:
+) -> tuple[int, int]:
+    from app.services import sending_engine_service as _ses
+
     start_uid = int(account.last_imap_uid or 0) + 1
     status_value, data = client.uid("SEARCH", None, f"UID {start_uid}:*")
     if status_value != "OK":
-        return 0
+        return 0, 0
 
     uid_strings = [u.decode() for u in (data[0] or b"").split()]
     max_fetch = int(getattr(account, "max_imap_fetch", None) or 100)
     uid_strings = uid_strings[:max_fetch]
 
+    lead_emails = _workspace_lead_emails_lower(account.workspace_id, db)
+    fetch_batch = max(1, _ses._IMAP_FETCH_BATCH)
+
+    uids_need_full: list[str] = []
+    for bi in range(0, len(uid_strings), fetch_batch):
+        chunk = uid_strings[bi : bi + fetch_batch]
+        hdr_by_uid = _ses._imap_batch_fetch_uid_header_fields(
+            client,
+            chunk,
+            "FROM MESSAGE-ID DATE SUBJECT IN-REPLY-TO REFERENCES",
+        )
+        for uid in chunk:
+            blob = hdr_by_uid.get(uid)
+            if not blob:
+                uids_need_full.append(uid)
+                continue
+            try:
+                hmsg = _message_from_header_fields_bytes(blob)
+                from_address = _from_address_from_header_fetch_blob(blob)
+                if not from_address:
+                    from_raw = hmsg.get("From", "") or ""
+                    from_address = (parseaddr(from_raw)[1] or "").strip().lower()
+                    if not from_address:
+                        from_address = from_raw.strip().lower()
+                mid = (hmsg.get("Message-ID") or "").strip()
+            except Exception:
+                uids_need_full.append(uid)
+                continue
+
+            if not lead_emails or from_address not in lead_emails:
+                continue
+
+            if mid and repositories.unibox_repository.message_exists_by_header(mid, db):
+                continue
+
+            uids_need_full.append(uid)
+
+    need_full = set(uids_need_full)
     max_seen_uid = int(account.last_imap_uid or 0)
     ingested = 0
+    replies = 0
 
     for uid in uid_strings:
         try:
-            count = _ingest_one_uid(uid, account, client, db)
-            ingested += count
+            if uid in need_full:
+                n, r = _ingest_one_uid(uid, account, client, db)
+                ingested += n
+                replies += r
         except Exception:
             db.rollback()
         max_seen_uid = max(max_seen_uid, int(uid))
@@ -108,7 +256,7 @@ def _process_inbox(
     account.last_imap_uid = max_seen_uid or account.last_imap_uid
     db.flush()
     db.commit()
-    return ingested
+    return ingested, replies
 
 
 def _ingest_one_uid(
@@ -116,15 +264,15 @@ def _ingest_one_uid(
     account: SenderAccount,
     client: imaplib.IMAP4_SSL,
     db: Session,
-) -> int:
-    """Download, parse, and persist one IMAP message. Returns 1 if ingested, 0 if skipped."""
+) -> tuple[int, int]:
+    """Download, parse, and persist one IMAP message. Returns (1, reply?) if ingested, (0, 0) if skipped."""
     status_fetch, msg_data = client.uid("FETCH", uid, "(RFC822)")
     if status_fetch != "OK" or not msg_data:
-        return 0
+        return 0, 0
 
     raw_bytes = msg_data[0][1] if isinstance(msg_data[0], tuple) else None
     if not raw_bytes:
-        return 0
+        return 0, 0
 
     msg = email.message_from_bytes(raw_bytes)
 
@@ -137,7 +285,7 @@ def _ingest_one_uid(
 
     # Idempotency check.
     if repositories.unibox_repository.message_exists_by_header(message_id_header, db):
-        return 0
+        return 0, 0
 
     in_reply_to = (msg.get("In-Reply-To") or "").strip() or None
     references_header = (msg.get("References") or "").strip() or None
@@ -153,8 +301,12 @@ def _ingest_one_uid(
 
     # --- Resolve lead and campaign ---
     lead, campaign_id = _resolve_lead_and_campaign(from_address, account.workspace_id, db)
-    is_orphan = lead is None
-    lead_id = lead.lead_id if lead else None
+    if lead is None:
+        # Unibox is for campaign conversations only — not the full mailbox.
+        return 0, 0
+
+    lead_id = lead.lead_id
+    is_orphan = False
 
     # --- Resolve or create thread ---
     thread = threading_service.resolve_or_create_thread(
@@ -205,10 +357,12 @@ def _ingest_one_uid(
 
     # If the sender is a known lead, also fire an EmailEvent('replied') so
     # that existing campaign analytics continue to work.
+    reply_fired = 0
     if lead is not None:
-        _maybe_fire_reply_event(lead, account, uid, db)
+        if _maybe_fire_reply_event(lead, account, uid, db):
+            reply_fired = 1
 
-    return 1
+    return 1, reply_fired
 
 
 def _resolve_lead_and_campaign(
@@ -235,7 +389,7 @@ def _resolve_lead_and_campaign(
 
 def _maybe_fire_reply_event(
     lead: Lead, account: SenderAccount, uid: str, db: Session
-) -> None:
+) -> bool:
     """
     Create an EmailEvent('replied') for known-lead replies so that campaign
     analytics (reply rate, etc.) remain accurate.
@@ -258,7 +412,7 @@ def _maybe_fire_reply_event(
         .first()
     )
     if recent:
-        return
+        return False
 
     db.add(
         EmailEvent(
@@ -273,6 +427,7 @@ def _maybe_fire_reply_event(
     lead.lead_status = "replied"
     lead.delivery_state = "paused"
     db.flush()
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -365,10 +520,15 @@ def _build_search_vector(
     Compute a PostgreSQL tsvector from subject + body_text + from_address.
     Executed as a scalar SQL expression so the DB handles the NLP.
     """
+    # Cap body size for tsvector generation (large newsletters were slow on INSERT).
+    bt = body_text or ""
+    if len(bt) > 24000:
+        bt = bt[:24000]
+
     combined = (
         (subject or "")
         + " "
-        + (body_text or "")
+        + bt
         + " "
         + (from_address or "")
     )

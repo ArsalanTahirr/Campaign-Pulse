@@ -38,6 +38,17 @@ def _get_campaign_status(campaign_id: str, db: Session) -> str:
     return status_value
 
 
+def _assert_send_window_times(send_time: str | None, send_window_end: str | None) -> None:
+    if not send_time:
+        return
+    end = send_window_end or send_time
+    if end < send_time:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="send_window_end must be greater than or equal to send_time.",
+        )
+
+
 def _assert_sequence_editable(campaign_id: str, db: Session) -> None:
     campaign_status = _get_campaign_status(campaign_id, db)
     if campaign_status == "completed":
@@ -82,6 +93,7 @@ def create_step(
     step_number: int,
     wait_days: int,
     send_time: Optional[str],
+    send_window_end: Optional[str],
     send_days: list,
     email_variants_data: list[dict],
     db: Session,
@@ -92,6 +104,7 @@ def create_step(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="send_time is required when creating a step.",
         )
+    _assert_send_window_times(send_time, send_window_end)
     if not send_days:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -118,6 +131,7 @@ def create_step(
         step_number=step_number,
         wait_days=wait_days,
         send_time=send_time,
+        send_window_end=send_window_end,
         send_days=send_days,
     )
     db.add(step)
@@ -163,14 +177,15 @@ def update_step(
                 detail=f"Step number {new_num} is already taken.",
             )
 
-    # Apply explicit PATCH fields. Allow null for send_time only. Ignore send_days=null (omit = no change).
-    nullable_step_fields = frozenset({"send_time"})
+    # Apply explicit PATCH fields. Allow null for send_time / send_window_end only. Ignore send_days=null.
+    nullable_step_fields = frozenset({"send_time", "send_window_end"})
     for field, value in updates.items():
         if field == "send_days" and value is None:
             continue
         if value is None and field not in nullable_step_fields:
             continue
         setattr(step, field, value)
+    _assert_send_window_times(step.send_time, step.send_window_end)
     db.commit()
     db.refresh(step)
     return step

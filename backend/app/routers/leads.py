@@ -144,7 +144,7 @@ def delete_lead(
     workspace_id: str,
     campaign_id: str,
     lead_id: str,
-    _: None = require_permission("import_leads"),
+    _: None = require_permission("manage_leads"),
     db: Session = Depends(get_db),
 ):
     lead_service.delete_lead(lead_id, campaign_id, db)

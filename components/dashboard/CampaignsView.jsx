@@ -457,7 +457,13 @@ export default function CampaignsView() {
                       type="button"
                       disabled={
                         actionLoading === campaign.campaign_id ||
-                        !["active", "draft", "paused"].includes(campaign.status)
+                        !["active", "draft", "paused"].includes(campaign.status) ||
+                        (campaign.status !== "active" && (campaign.lead_count ?? 0) < 1)
+                      }
+                      title={
+                        campaign.status !== "active" && (campaign.lead_count ?? 0) < 1
+                          ? "Add at least one lead before starting or resuming."
+                          : undefined
                       }
                       onClick={() => handleToggleCampaign(campaign)}
                       className="rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"

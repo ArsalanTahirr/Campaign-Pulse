@@ -91,6 +91,9 @@ class SenderAccountOut(BaseModel):
     status: str
     daily_sending_limit: int
     sent_count_today: int
+    # From EmailEvent (UTC calendar day), for dashboard columns — excludes warmup from lead count.
+    lead_sent_count_today: int = 0
+    warmup_sent_count_today: int = 0
     min_delay_seconds: int
     max_imap_fetch: Optional[int]
     last_imap_uid: Optional[int]

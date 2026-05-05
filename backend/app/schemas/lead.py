@@ -2,7 +2,6 @@
 schemas/lead.py — Pydantic v2 models for Leads and LeadImportSessions.
 
 ORM column is `lead_status`; exposed as `status` in the API via validation_alias.
-Lead has no `created_at` column — it is not included in LeadOut.
 """
 
 from datetime import datetime
@@ -46,6 +45,7 @@ class LeadOut(BaseModel):
     status: str = Field(validation_alias="lead_status")
     custom_variables: Optional[dict[str, Any]] = None
     import_session_id: Optional[str] = None
+    created_at: datetime
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 

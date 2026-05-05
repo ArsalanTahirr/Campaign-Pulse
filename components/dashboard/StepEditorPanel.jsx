@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import {
   DayPicker,
   DEFAULT_STEP_SEND_DAYS,
+  hhmmToMinutes,
   normalizeSendTimeToHHMM,
 } from "@/components/dashboard/stepScheduleShared";
 import { messageFromApiErrorBody, userMessageFromFetchError } from "@/utils/apiError";
@@ -113,6 +114,9 @@ export default function StepEditorPanel({ step, workspaceId, campaignId, readOnl
 
   const [waitDays, setWaitDays] = useState(step?.wait_days ?? 0);
   const [sendTime, setSendTime] = useState(normalizeSendTimeToHHMM(step?.send_time || "09:00"));
+  const [sendWindowEnd, setSendWindowEnd] = useState(
+    normalizeSendTimeToHHMM(step?.send_window_end || "17:00")
+  );
   const [sendDays, setSendDays] = useState(() => {
     const sd = step?.send_days;
     if (Array.isArray(sd) && sd.length > 0) return [...sd];
@@ -128,11 +132,12 @@ export default function StepEditorPanel({ step, workspaceId, campaignId, readOnl
   useEffect(() => {
     setWaitDays(step?.wait_days ?? 0);
     setSendTime(normalizeSendTimeToHHMM(step?.send_time || "09:00"));
+    setSendWindowEnd(normalizeSendTimeToHHMM(step?.send_window_end || "17:00"));
     const sd = step?.send_days;
     setSendDays(
       Array.isArray(sd) && sd.length > 0 ? [...sd] : [...DEFAULT_STEP_SEND_DAYS]
     );
-  }, [step?.step_id, step?.wait_days, step?.send_time, step?.send_days]);
+  }, [step?.step_id, step?.wait_days, step?.send_time, step?.send_window_end, step?.send_days]);
 
   const base = `${API}/workspaces/${workspaceId}/campaigns/${campaignId}/steps/${step?.step_id}/emails`;
   const stepBase = `${API}/workspaces/${workspaceId}/campaigns/${campaignId}/steps/${step?.step_id}`;
@@ -140,12 +145,21 @@ export default function StepEditorPanel({ step, workspaceId, campaignId, readOnl
   async function handleSaveSchedule(event) {
     event?.preventDefault();
     const hhmm = normalizeSendTimeToHHMM(sendTime);
+    const endHHMM = normalizeSendTimeToHHMM(sendWindowEnd);
     if (!hhmm) {
-      toast.error("Please set a send time for this step (24-hour clock, e.g. 09:00).");
+      toast.error("Please set a start time (24-hour clock, e.g. 09:00).");
       return;
     }
-    if (!/^\d{2}:\d{2}$/.test(hhmm)) {
-      toast.error("Send time must look like HH:MM (for example 09:30).");
+    if (!endHHMM) {
+      toast.error("Please set an end time (e.g. 17:00).");
+      return;
+    }
+    if (!/^\d{2}:\d{2}$/.test(hhmm) || !/^\d{2}:\d{2}$/.test(endHHMM)) {
+      toast.error("Times must look like HH:MM (for example 09:30).");
+      return;
+    }
+    if (hhmmToMinutes(endHHMM) < hhmmToMinutes(hhmm)) {
+      toast.error("End time must be the same as or after start time.");
       return;
     }
     if (sendDays.length === 0) {
@@ -161,6 +175,7 @@ export default function StepEditorPanel({ step, workspaceId, campaignId, readOnl
         body: JSON.stringify({
           wait_days: waitDays,
           send_time: hhmm,
+          send_window_end: endHHMM,
           send_days: sendDays,
         }),
       });
@@ -286,8 +301,7 @@ export default function StepEditorPanel({ step, workspaceId, campaignId, readOnl
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
-                  Send time <span className="text-rose-600">*</span>{" "}
-                  <span className="font-normal text-slate-400">(24h)</span>
+                  Start time <span className="text-rose-600">*</span>
                 </label>
                 <input
                   type="time"
@@ -298,14 +312,31 @@ export default function StepEditorPanel({ step, workspaceId, campaignId, readOnl
                   className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
                 />
               </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+                  End time <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  type="time"
+                  required
+                  disabled={readOnly}
+                  value={sendWindowEnd}
+                  onChange={(e) => setSendWindowEnd(e.target.value)}
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                />
+              </div>
             </div>
+            <p className="text-[11px] leading-snug text-slate-500 dark:text-slate-500">
+              Same start and end time means one send slot (that minute), not all day. For a full-day window, use{" "}
+              <span className="font-mono">00:00</span> and <span className="font-mono">23:59</span> in the campaign
+              timezone.
+            </p>
             <div>
               <label className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400">
                 Send days <span className="text-rose-600">*</span>
               </label>
               <p className="mb-1.5 text-[11px] leading-snug text-slate-500 dark:text-slate-500">
-                Each step must define which weekdays it may send; there is no campaign-wide send-day
-                window anymore.
+                Emails send only on these weekdays, between start and end time (inclusive), in the campaign&apos;s timezone.
               </p>
               <DayPicker value={sendDays} onChange={setSendDays} disabled={readOnly} />
             </div>

@@ -246,8 +246,9 @@ class TestIngestionService:
 
         sender = setup["sender"]
         # Default make_sender_account has no imap_host.
-        count = ingestion_service.ingest_account(sender, db)
-        assert count == 0
+        ingested, replies = ingestion_service.ingest_account(sender, db)
+        assert ingested == 0
+        assert replies == 0
 
     def test_build_search_vector_not_null(self, db):
         """Test 6: _build_search_vector returns a non-null PostgreSQL tsvector."""
@@ -260,6 +261,15 @@ class TestIngestionService:
             db=db,
         )
         assert result is not None
+
+    def test_workspace_lead_emails_lower_uses_workspace_id_first(self, db, setup_with_lead):
+        """Regression: _workspace_lead_emails_lower(workspace_id, db) must not swap args (would break IMAP prefilter)."""
+        from app.services.unibox.ingestion_service import _workspace_lead_emails_lower
+
+        wid = setup_with_lead["workspace_id"]
+        lead = setup_with_lead["lead"]
+        emails = _workspace_lead_emails_lower(wid, db)
+        assert lead.email.lower() in emails
 
     def test_idempotency_duplicate_message_id(self, db, setup):
         """Test 7: Ingesting the same Message-ID twice creates only one record."""

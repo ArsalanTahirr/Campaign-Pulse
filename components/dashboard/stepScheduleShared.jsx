@@ -10,6 +10,17 @@ export function normalizeSendTimeToHHMM(value) {
   return v;
 }
 
+/** Compare two HH:MM strings; returns (endMinutes - startMinutes), or 0 if unparsable. */
+export function hhmmToMinutes(hhmm) {
+  if (!hhmm || typeof hhmm !== "string") return 0;
+  const parts = normalizeSendTimeToHHMM(hhmm).split(":");
+  if (parts.length < 2) return 0;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return h * 60 + m;
+}
+
 export const SCHEDULE_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 /** Default when adding a step — user can change before save. */

@@ -368,6 +368,9 @@ def seed(db: Session) -> None:
             campaign_id=camp.campaign_id,
             step_number=1,
             wait_days=0,
+            send_time="09:00",
+            send_window_end="17:00",
+            send_days=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
         )
         db.add(step)
         db.flush()

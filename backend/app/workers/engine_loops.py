@@ -55,18 +55,15 @@ async def imap_reply_loop():
     while True:
         try:
             if is_engine_enabled():
-                # Legacy path: fires EmailEvent('replied') records.
-                with SessionLocal() as db:
-                    sending_engine_service.run_imap_reply_iteration(db)
-
-                # Unibox ingestion path: stores full message content.
-                from app.database import SessionLocal as _SL
                 from app.models import SenderAccount
                 from app.services.unibox import ingestion_service
 
-                with _SL() as db:
-                    accounts = (
-                        db.query(SenderAccount)
+                # Ingest first (parallel accounts, isolated sessions). Header prefetch
+                # inside ingest skips full downloads for non-lead mail.
+                with SessionLocal() as db:
+                    account_ids = [
+                        row[0]
+                        for row in db.query(SenderAccount.account_id)
                         .filter(
                             SenderAccount.imap_host.isnot(None),
                             SenderAccount.imap_port.isnot(None),
@@ -75,12 +72,15 @@ async def imap_reply_loop():
                             SenderAccount.deleted_at.is_(None),
                         )
                         .all()
-                    )
-                    for account in accounts:
-                        try:
-                            ingestion_service.ingest_account(account, db)
-                        except Exception:
-                            pass
+                    ]
+                try:
+                    ingestion_service.ingest_accounts_parallel(account_ids)
+                except Exception:
+                    pass
+
+                # Warmup spam rescue (reply detection is handled in ingestion only).
+                with SessionLocal() as db:
+                    sending_engine_service.run_imap_reply_iteration(db)
         except Exception:
             pass
         await asyncio.sleep(IMAP_LOOP_SECONDS)

@@ -166,12 +166,26 @@ def attach_sender_to_campaign(db, campaign_id, sender_account_id):
     return row
 
 
+_ALL_WEEKDAYS = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]
+
+
 def make_step(db, campaign_id, step_number=1, wait_days=0):
     step = SequenceStep(
         step_id=str(uuid.uuid4()),
         campaign_id=campaign_id,
         step_number=step_number,
         wait_days=wait_days,
+        send_time="00:00",
+        send_window_end="23:59",
+        send_days=_ALL_WEEKDAYS,
     )
     db.add(step)
     db.commit()

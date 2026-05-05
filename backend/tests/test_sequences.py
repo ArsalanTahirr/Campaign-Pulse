@@ -160,7 +160,25 @@ def test_valid_send_time(client, db, owner, ws, campaign):
         cookies=auth_cookies(owner),
     )
     assert res.status_code == 201
-    assert res.json()["send_time"] == "09:00"
+    data = res.json()
+    assert data["send_time"] == "09:00"
+    assert data["send_window_end"] == "17:00"
+
+
+def test_send_window_end_before_start_rejected(client, db, owner, ws, campaign):
+    res = client.post(
+        f"/workspaces/{ws.workspace_id}/campaigns/{campaign.campaign_id}/steps",
+        json={
+            "step_number": 1,
+            "wait_days": 0,
+            "send_time": "17:00",
+            "send_window_end": "09:00",
+            "send_days": SEND_DAYS_WEEKDAYS,
+            "email_variants": [],
+        },
+        cookies=auth_cookies(owner),
+    )
+    assert res.status_code == 422
 
 
 def test_wait_days_required_on_create(client, db, owner, ws, campaign):
