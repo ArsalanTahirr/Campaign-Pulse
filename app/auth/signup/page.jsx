@@ -53,18 +53,20 @@ const stepVariants = {
   })
 };
 
-function FloatingInput({ id, label, type = "text", value, onChange, autoComplete, className = "", error, ...rest }) {
-  const errorInputClass = error
+function FloatingInput({ id, label, type = "text", value, onChange, autoComplete, className = "", error, touched, ...rest }) {
+  const showError = touched && !!error;
+
+  const errorInputClass = showError
     ? "border-red-500 bg-red-50 focus:border-red-500 focus:ring-4 focus:ring-red-500/20 text-red-900 pr-10"
     : "border-slate-200 focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20 shadow-sm";
-    
-  const errorLabelClass = error
+
+  const errorLabelClass = showError
     ? "text-red-500 peer-focus:text-red-600 peer-[:not(:placeholder-shown)]:text-red-500"
     : "text-slate-500 peer-focus:text-brand-600";
 
   return (
-    <div>
-      <div className={`relative ${className} ${error ? "animate-shake" : ""}`}>
+    <div className="relative pb-5">
+      <div className={`relative ${className} ${showError ? "animate-shake" : ""}`}>
         <input
           id={id}
           type={type}
@@ -78,17 +80,26 @@ function FloatingInput({ id, label, type = "text", value, onChange, autoComplete
         <label htmlFor={id} className={`${floatingLabelClass} ${errorLabelClass}`}>
           {label}
         </label>
-        {error && (
+        {showError && (
           <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
             <AlertCircle className="h-4 w-4 text-red-500" aria-hidden="true" />
           </div>
         )}
       </div>
-      <div className={`grid transition-all duration-300 ease-in-out ${error ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
-        <div className="overflow-hidden">
-          <p className="text-xs text-red-600">{error}</p>
-        </div>
-      </div>
+      <AnimatePresence>
+        {showError && (
+          <motion.p
+            key="fi-error"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18 }}
+            className="absolute bottom-0 left-0 text-xs text-red-600"
+          >
+            {error}
+          </motion.p>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -111,9 +122,14 @@ export default function SignupPage() {
   const [direction, setDirection] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+
+  function markTouched(field) {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+  }
 
   function sanitizeTextInput(value) {
     return value.replace(/[<>&"'`]/g, "");
@@ -131,17 +147,15 @@ export default function SignupPage() {
   }
 
   function parseDateOnly(dateValue) {
-    // Handles date inputs like "YYYY-MM-DD" in a timezone-stable way.
     if (typeof dateValue !== "string") return null;
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
     if (!match) return null;
 
     const year = Number(match[1]);
-    const monthIndex = Number(match[2]) - 1; // JS months are 0-based
+    const monthIndex = Number(match[2]) - 1;
     const day = Number(match[3]);
 
     const date = new Date(year, monthIndex, day);
-    // Guard against invalid dates like 2026-02-31 (JS will roll over).
     if (Number.isNaN(date.getTime())) return null;
     if (date.getFullYear() !== year || date.getMonth() !== monthIndex || date.getDate() !== day) return null;
     return date;
@@ -159,7 +173,6 @@ export default function SignupPage() {
   function isAtLeast18(dateOfBirth) {
     if (!dateOfBirth) return false;
 
-    // Explicitly reject future DOBs.
     if (isDobInFuture(dateOfBirth)) return false;
 
     const dob = parseDateOnly(dateOfBirth);
@@ -189,6 +202,7 @@ export default function SignupPage() {
       if (!trimmedLastName || trimmedLastName.length < 2) {
         nextErrors.lastName = "Last name must be at least 2 characters.";
       }
+      setTouched((prev) => ({ ...prev, firstName: true, lastName: true }));
     }
 
     if (step === 2) {
@@ -202,6 +216,7 @@ export default function SignupPage() {
       if (!formData.gender) {
         nextErrors.gender = "Please indicate your gender.";
       }
+      setTouched((prev) => ({ ...prev, dob: true, gender: true }));
     }
 
     if (step === 3) {
@@ -220,6 +235,7 @@ export default function SignupPage() {
       if (!formData.termsAccepted) {
         nextErrors.termsAccepted = "You must accept the Terms of Use and Privacy Policy.";
       }
+      setTouched((prev) => ({ ...prev, email: true, password: true, termsAccepted: true }));
     }
 
     setErrors((prev) => ({ ...prev, ...nextErrors }));
@@ -229,7 +245,7 @@ export default function SignupPage() {
   function validateSignupField(field) {
     const nextErrors = { ...errors };
     const value = formData[field] || "";
-    
+
     if (field === "firstName") {
       if (!value.trim() || value.trim().length < 2) {
         nextErrors.firstName = "First name must be at least 2 characters.";
@@ -322,7 +338,6 @@ export default function SignupPage() {
             }
           }
         } catch {
-          // Keep fallback message.
         }
         throw new Error(message);
       }
@@ -334,7 +349,6 @@ export default function SignupPage() {
           message = data.detail;
         }
       } catch {
-        // Keep default success message.
       }
       setSuccessMessage(message);
     } catch (error) {
@@ -351,7 +365,6 @@ export default function SignupPage() {
   return (
     <main className="min-h-screen bg-white">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
-        {/* Left: form */}
         <section className="relative flex min-h-screen flex-col items-center justify-center px-6 py-16 sm:px-10 lg:px-12">
           <Link
             href="/"
@@ -368,9 +381,8 @@ export default function SignupPage() {
               {[1, 2, 3].map((step) => (
                 <div
                   key={step}
-                  className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${
-                    step <= currentStep ? "bg-brand-600" : "bg-slate-200"
-                  }`}
+                  className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${step <= currentStep ? "bg-brand-600" : "bg-slate-200"
+                    }`}
                 />
               ))}
             </div>
@@ -396,18 +408,20 @@ export default function SignupPage() {
                         label="First name"
                         value={formData.firstName}
                         onChange={(v) => updateField("firstName", v)}
-                        onBlur={() => validateSignupField("firstName")}
+                        onBlur={() => { markTouched("firstName"); validateSignupField("firstName"); }}
                         autoComplete="given-name"
                         error={errors.firstName}
+                        touched={touched.firstName}
                       />
                       <FloatingInput
                         id="lastName"
                         label="Last name"
                         value={formData.lastName}
                         onChange={(v) => updateField("lastName", v)}
-                        onBlur={() => validateSignupField("lastName")}
+                        onBlur={() => { markTouched("lastName"); validateSignupField("lastName"); }}
                         autoComplete="family-name"
                         error={errors.lastName}
+                        touched={touched.lastName}
                       />
                     </div>
                     <FloatingInput
@@ -476,12 +490,12 @@ export default function SignupPage() {
                       <label htmlFor="dob" className="mb-2 block text-sm font-medium text-slate-700">
                         Date of birth
                       </label>
-                      <div className={errors.dob ? "animate-shake" : ""}>
+                      <div className={touched.dob && errors.dob ? "animate-shake" : ""}>
                         <DatePickerPopover
                           id="dob"
                           value={formData.dob}
                           onChange={(v) => updateField("dob", v)}
-                          onBlur={() => validateSignupField("dob")}
+                          onBlur={() => { markTouched("dob"); validateSignupField("dob"); }}
                           error={errors.dob}
                           placeholder="Select your birth date"
                         />
@@ -492,12 +506,12 @@ export default function SignupPage() {
                       <label htmlFor="gender" className="mb-2 block text-sm font-medium text-slate-700">
                         Gender
                       </label>
-                      <div className={errors.gender ? "animate-shake" : ""}>
+                      <div className={touched.gender && errors.gender ? "animate-shake" : ""}>
                         <GenderSelect
                           id="gender"
                           value={formData.gender}
                           onChange={(v) => updateField("gender", v)}
-                          onBlur={() => validateSignupField("gender")}
+                          onBlur={() => { markTouched("gender"); validateSignupField("gender"); }}
                           error={errors.gender}
                         />
                       </div>
@@ -538,13 +552,14 @@ export default function SignupPage() {
                       type="email"
                       value={formData.email}
                       onChange={(v) => updateField("email", v)}
-                      onBlur={() => validateSignupField("email")}
+                      onBlur={() => { markTouched("email"); validateSignupField("email"); }}
                       autoComplete="email"
                       error={errors.email}
+                      touched={touched.email}
                     />
 
-                    <div>
-                      <div className={`relative ${errors.password ? "animate-shake" : ""}`}>
+                    <div className="relative pb-5">
+                      <div className={`relative ${touched.password && errors.password ? "animate-shake" : ""}`}>
                         <input
                           id="signup-password"
                           type={showPassword ? "text" : "password"}
@@ -552,18 +567,16 @@ export default function SignupPage() {
                           autoComplete="new-password"
                           value={formData.password}
                           onChange={(e) => updateField("password", e.target.value)}
-                          onBlur={() => validateSignupField("password")}
-                          className={`${inputPeerClass} ${
-                            errors.password
-                              ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
-                              : "border-slate-200 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
-                          } pr-14`}
+                          onBlur={() => { markTouched("password"); validateSignupField("password"); }}
+                          className={`${inputPeerClass} ${touched.password && errors.password
+                            ? "border-red-500 bg-red-50 text-red-900 focus:border-red-500 focus:ring-4 focus:ring-red-500/20"
+                            : "border-slate-200 shadow-sm focus:border-brand-500 focus:shadow-glow focus:ring-4 focus:ring-brand-500/20"
+                            } pr-14`}
                         />
-                        <label htmlFor="signup-password" className={`${floatingLabelClass} ${
-                          errors.password
-                            ? "text-red-500 peer-focus:text-red-600 peer-[:not(:placeholder-shown)]:text-red-500"
-                            : "text-slate-500 peer-focus:text-brand-600"
-                        }`}>
+                        <label htmlFor="signup-password" className={`${floatingLabelClass} ${touched.password && errors.password
+                          ? "text-red-500 peer-focus:text-red-600 peer-[:not(:placeholder-shown)]:text-red-500"
+                          : "text-slate-500 peer-focus:text-brand-600"
+                          }`}>
                           Password
                         </label>
                         <div className="absolute inset-y-0 right-2 z-[2] flex items-center gap-1">
@@ -576,11 +589,20 @@ export default function SignupPage() {
                           </button>
                         </div>
                       </div>
-                      <div className={`grid transition-all duration-300 ease-in-out ${errors.password ? "grid-rows-[1fr] opacity-100 mt-1.5" : "grid-rows-[0fr] opacity-0"}`}>
-                        <div className="overflow-hidden">
-                          <p className="text-xs text-red-600">{errors.password}</p>
-                        </div>
-                      </div>
+                      <AnimatePresence>
+                        {touched.password && errors.password && (
+                          <motion.p
+                            key="pw-error"
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -4 }}
+                            transition={{ duration: 0.18 }}
+                            className="absolute bottom-0 left-0 text-xs text-red-600"
+                          >
+                            {errors.password}
+                          </motion.p>
+                        )}
+                      </AnimatePresence>
                     </div>
 
                     <div>
