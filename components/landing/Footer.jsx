@@ -45,13 +45,13 @@ export default function Footer() {
               Empowering your email outreach with precision analytics and real-time pulse tracking.
             </p>
             <div className="flex gap-3 mt-5">
-              <SocialIcon href="https://github.com" label="GitHub">
+              <SocialIcon href="https://github.com/ArsalanTahirr/Campaign-Pulse" label="GitHub">
                 <Github className="h-5 w-5" strokeWidth={1.8} />
               </SocialIcon>
-              <SocialIcon href="https://linkedin.com" label="LinkedIn">
+              <SocialIcon href="https://www.linkedin.com/in/usayd-arsalan/" label="LinkedIn">
                 <Linkedin className="h-5 w-5" strokeWidth={1.8} />
               </SocialIcon>
-              <SocialIcon href="https://twitter.com" label="Twitter">
+              <SocialIcon href="https://x.com/elonmusk" label="Twitter">
                 <Twitter className="h-5 w-5" strokeWidth={1.8} />
               </SocialIcon>
             </div>
@@ -78,23 +78,18 @@ export default function Footer() {
             </h3>
             <div className="flex flex-col gap-3">
               <FooterLink href="/resources">Knowledge Base</FooterLink>
-              <FooterLink href="/docs" external>API Docs</FooterLink>
               <FooterLink href="/demo">Watch Demo</FooterLink>
             </div>
           </div>
 
           {/* Legal Column */}
           <div className="col-span-1">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 mb-4">
+            <h3 className="text-xs font-semibold tracking-widest uppercase text-slate-300 mb-4">
               Legal
             </h3>
-            <div className="flex flex-col space-y-3">
-              <Link href="/privacy" className="text-sm text-gray-400 hover:text-white transition-colors duration-150 inline-block w-fit">
-                Privacy
-              </Link>
-              <Link href="/terms" className="text-sm text-gray-400 hover:text-white transition-colors duration-150 inline-block w-fit">
-                Terms
-              </Link>
+            <div className="flex flex-col gap-3">
+              <FooterLink href="/privacy">Privacy</FooterLink>
+              <FooterLink href="/terms">Terms</FooterLink>
             </div>
           </div>
         </div>
