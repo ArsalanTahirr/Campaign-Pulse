@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -74,20 +75,35 @@ const STATUS_META = {
   active: {
     label: "Active",
     classes: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200",
+    colorBg: "bg-emerald-600",
   },
   warming_up: {
     label: "Warming up",
     classes: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200",
+    colorBg: "bg-orange-500",
   },
   suspended: {
     label: "Suspended",
     classes: "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-200",
+    colorBg: "bg-rose-500",
   },
   disconnected: {
     label: "Disconnected",
     classes: "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+    colorBg: "bg-slate-400",
   },
 };
+
+/** Pulse indicator for active status */
+function PulseIndicator({ color }) {
+  return (
+    <motion.div
+      className={`absolute -inset-0.5 rounded-full ${color} opacity-20`}
+      animate={{ scale: [1, 1.2, 1] }}
+      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+    />
+  );
+}
 
 /** Instantly-style section shell */
 function SectionCard({ icon: Icon, title, description, children, headerRight = null, allowOverflow = false }) {
@@ -95,7 +111,7 @@ function SectionCard({ icon: Icon, title, description, children, headerRight = n
     <section
       className={[
         allowOverflow ? "overflow-visible" : "overflow-hidden",
-        "rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900",
+        "rounded-2xl border border-slate-200/60 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900",
       ].join(" ")}
     >
       <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between dark:border-slate-800">
@@ -119,9 +135,9 @@ function SectionCard({ icon: Icon, title, description, children, headerRight = n
 
 function Subsection({ title, description, children }) {
   return (
-    <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
-      <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{title}</h3>
-      {description ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{description}</p> : null}
+    <div className="rounded-xl border border-slate-200/50 bg-white p-4 shadow-sm dark:border-slate-700/50 dark:bg-slate-900/50">
+      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
+      {description ? <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{description}</p> : null}
       <div className="mt-4 space-y-4">{children}</div>
     </div>
   );
@@ -138,7 +154,7 @@ function LabelField({ label, hint, children }) {
 }
 
 const inputClass =
-  "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-colors focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
+  "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
 
 function AccountForm({ value, onChange, saving, onSubmit, onCancel, mode }) {
   function handleProviderChange(nextProviderType) {
@@ -619,128 +635,177 @@ export default function EmailAccountsView() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8">
-      <header className="space-y-1">
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">Workspace</p>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">Email accounts</h1>
-        <p className="max-w-2xl text-sm text-slate-600 dark:text-slate-400">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+      <motion.div
+        className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+      >
+      <motion.header
+        className="space-y-1"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1, duration: 0.5 }}
+      >
+        <p className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-500">Workspace</p>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Email accounts</h1>
+        <p className="max-w-2xl text-base text-slate-600 dark:text-slate-400">
           Connect inboxes your campaigns send from. Configure limits and warmup, then use the engine tools to process the queue or scan for replies.
         </p>
-      </header>
+      </motion.header>
 
       {/* —— Section 1: Engine —— */}
-      <SectionCard
-        icon={Zap}
-        title="Sending engine"
-        description="Background workers process queued leads when enabled. Use the buttons below to run a single cycle now (useful for testing)."
-        headerRight={
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2, duration: 0.5 }}
+      >
+        <div className="relative rounded-2xl border border-indigo-100 bg-indigo-50/40 p-0.5 shadow-lg dark:border-indigo-900/30 dark:bg-indigo-950/20">
+          <SectionCard
+            icon={Zap}
+            title="Sending engine"
+            description="Background workers process queued leads when enabled. Use the buttons below to run a single cycle now (useful for testing)."
+            headerRight={
           <>
             {engineStatus ? (
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span
+                <motion.span
                   className={[
-                    "inline-flex items-center rounded-full px-2.5 py-1 font-medium",
-                    engineStatus.engine_enabled ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+                    "inline-flex items-center rounded-full px-2.5 py-1 font-semibold shadow-sm",
+                    engineStatus.engine_enabled
+                      ? "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-emerald-500/30"
+                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
                   ].join(" ")}
+                  whileHover={{ scale: 1.05 }}
                 >
-                  {engineStatus.engine_enabled ? "Auto-send on" : "Auto-send off"}
-                </span>
+                  {engineStatus.engine_enabled ? "✓ Auto-send on" : "Auto-send off"}
+                </motion.span>
                 <span
                   title={
                     typeof engineStatus.queued_ready === "number"
                       ? `${engineStatus.queued_ready} lead(s) are due to send now (same rules as Run send once). ${engineStatus.queued_leads} total queued in active campaigns (includes scheduled for later). Not your IMAP inbox.`
                       : "Leads in active campaigns with delivery_state=queued. Not your IMAP inbox or Unibox scan."
                   }
-                  className="cursor-help rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                  className="cursor-help inline-flex items-center rounded-full bg-gradient-to-r from-slate-100 to-slate-50 px-3 py-1 font-semibold text-slate-700 shadow-sm dark:from-slate-800 dark:to-slate-700 dark:text-slate-300"
                 >
-                  Send queue:{" "}
-                  {typeof engineStatus.queued_ready === "number" ? engineStatus.queued_ready : engineStatus.queued_leads}{" "}
-                  due now
-                  {typeof engineStatus.queued_ready === "number" &&
-                  engineStatus.queued_leads > engineStatus.queued_ready
-                    ? ` · ${engineStatus.queued_leads} total queued`
-                    : null}
+                  <motion.div
+                    animate={{ scale: [1, 1.1, 1] }}
+                    transition={{ duration: 2, repeat: Infinity }}
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <div className="h-2 w-2 rounded-full bg-indigo-500" />
+                    Queue: {typeof engineStatus.queued_ready === "number" ? engineStatus.queued_ready : engineStatus.queued_leads}
+                  </motion.div>
                 </span>
                 {engineStatus.sending_leads > 0 ? (
-                  <span className="rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
+                  <motion.span
+                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-100 to-orange-100 px-3 py-1 font-semibold text-amber-900 shadow-sm dark:from-amber-900/40 dark:to-orange-900/40 dark:text-amber-200"
+                    animate={{ scale: [1, 1.05, 1] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                  >
+                    <motion.div className="h-2 w-2 rounded-full bg-orange-500" animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 1.5, repeat: Infinity }} />
                     {engineStatus.sending_leads} in progress
-                  </span>
+                  </motion.span>
                 ) : null}
                 <PermissionGate action="manage_email_accounts">
-                  <button
+                  <motion.button
                     type="button"
                     onClick={() => toggleEngineEnabled(!engineStatus.engine_enabled)}
                     disabled={opLoading === "toggle-engine"}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     className={[
-                      "rounded-full px-2.5 py-1 font-medium transition-colors",
+                      "rounded-full px-3 py-1.5 font-semibold transition-all shadow-sm",
                       engineStatus.engine_enabled
-                        ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                        ? "bg-gradient-to-r from-emerald-600 to-emerald-500 text-white hover:shadow-emerald-500/30"
                         : "bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200",
                     ].join(" ")}
                   >
                     {opLoading === "toggle-engine"
                       ? "Saving..."
                       : engineStatus.engine_enabled
-                        ? "Disable auto-send"
-                        : "Enable auto-send"}
-                  </button>
+                        ? "Disable"
+                        : "Enable"}
+                  </motion.button>
                 </PermissionGate>
               </div>
             ) : null}
-            <button
+            <motion.button
               type="button"
               onClick={() => {
                 fetchAccounts();
                 fetchEngineStatus();
               }}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition-all dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <RefreshCcw className="h-4 w-4" />
-              Refresh status
-            </button>
+              Refresh
+            </motion.button>
           </>
         }
       >
         <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
           Set <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px] dark:bg-slate-800">ENABLE_SENDING_ENGINE=true</code> on the API server for continuous processing.
         </p>
-        <div className="flex flex-wrap gap-2">
+        <motion.div
+          className="flex flex-wrap gap-3"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ staggerChildren: 0.1, delayChildren: 0.3 }}
+        >
           <PermissionGate action="manage_email_accounts">
-            <button
+            <motion.button
               type="button"
               onClick={() => runEngineOp("send")}
               disabled={opLoading === "send"}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              whileHover={{ scale: 1.05, boxShadow: "0 10px 30px rgba(59, 130, 246, 0.3)" }}
+              whileTap={{ scale: 0.95 }}
+              className="inline-flex items-center gap-2 rounded-xl border-2 border-blue-300/50 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-2.5 text-sm font-semibold text-blue-700 shadow-md hover:border-blue-400/80 transition-all dark:border-blue-700/50 dark:from-blue-950/40 dark:to-indigo-950/40 dark:text-blue-200"
             >
-              {opLoading === "send" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4 text-blue-600" />}
+              {opLoading === "send" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Mail className="h-4 w-4" />
+              )}
               Run send once
-            </button>
+            </motion.button>
           </PermissionGate>
           <PermissionGate action="manage_email_accounts">
-            <button
+            <motion.button
               type="button"
               onClick={() => runEngineOp("warmup")}
               disabled={opLoading === "warmup"}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              whileHover={{ scale: 1.05, boxShadow: "0 10px 30px rgba(245, 158, 11, 0.3)" }}
+              whileTap={{ scale: 0.95 }}
+              className="inline-flex items-center gap-2 rounded-xl border-2 border-amber-300/50 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-2.5 text-sm font-semibold text-amber-700 shadow-md hover:border-amber-400/80 transition-all dark:border-amber-700/50 dark:from-amber-950/40 dark:to-orange-950/40 dark:text-amber-200"
             >
-              {opLoading === "warmup" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Flame className="h-4 w-4 text-orange-500" />}
+              {opLoading === "warmup" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Flame className="h-4 w-4" />
+              )}
               Run warmup once
-            </button>
+            </motion.button>
           </PermissionGate>
           <PermissionGate action="manage_email_accounts">
-            <button
+            <motion.button
               type="button"
               onClick={() => runEngineOp("imap")}
               disabled={opLoading === "imap"}
               title="Reads each connected sender’s INBOX (not Sent). A reply is recorded when the message From matches a lead email in this workspace. Mail that only exists in Spam or another folder is not scanned."
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-300/50 bg-gradient-to-r from-slate-50 to-stone-50 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-md hover:border-slate-400/80 transition-all dark:border-slate-700/50 dark:from-slate-950/40 dark:to-stone-950/40 dark:text-slate-200"
             >
               {opLoading === "imap" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Inbox className="h-4 w-4 text-slate-600" />}
               Scan inboxes (IMAP)
-            </button>
+            </motion.button>
           </PermissionGate>
-        </div>
+        </motion.div>
       </SectionCard>
+      </div>
+      </motion.div>
 
       {/* —— Section 2: Account list —— */}
       <SectionCard
@@ -750,14 +815,16 @@ export default function EmailAccountsView() {
         allowOverflow
         headerRight={
           <PermissionGate action="manage_email_accounts">
-            <button
+            <motion.button
               type="button"
               onClick={openCreateForm}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-lg hover:shadow-blue-500/30 transition-all"
             >
               <Plus className="h-4 w-4" />
               Add email account
-            </button>
+            </motion.button>
           </PermissionGate>
         }
       >
@@ -768,21 +835,44 @@ export default function EmailAccountsView() {
         ) : error ? (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">{error}</div>
         ) : !hasAccounts ? (
-          <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-slate-200 bg-slate-50/80 py-14 text-center dark:border-slate-700 dark:bg-slate-900/50">
-            <Mail className="h-12 w-12 text-slate-300 dark:text-slate-600" />
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="flex flex-col items-center gap-6 rounded-xl border-2 border-dashed border-slate-300 bg-gradient-to-br from-slate-50/80 to-blue-50/40 py-16 px-4 text-center dark:border-slate-600 dark:from-slate-800/50 dark:to-slate-700/30"
+          >
+            <motion.div
+              animate={{ y: [0, -8, 0] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <Mail className="h-16 w-16 text-slate-300 dark:text-slate-600" />
+            </motion.div>
             <div>
-              <p className="font-medium text-slate-800 dark:text-slate-200">No accounts yet</p>
-              <p className="mt-1 max-w-md text-sm text-slate-500 dark:text-slate-400">Add your first mailbox to start sending. You can connect Gmail, Outlook, or any SMTP provider.</p>
+              <p className="text-lg font-bold text-slate-800 dark:text-slate-200">No email accounts yet</p>
+              <p className="mt-2 max-w-md text-sm text-slate-600 dark:text-slate-400">
+                Add your first mailbox to start sending campaigns. You can connect Gmail, Outlook, or any SMTP provider.
+              </p>
             </div>
             <PermissionGate action="manage_email_accounts">
-              <button type="button" onClick={openCreateForm} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              <motion.button
+                type="button"
+                onClick={openCreateForm}
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.95 }}
+                className="rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-2.5 text-sm font-semibold text-white shadow-lg hover:shadow-blue-500/30 transition-all"
+              >
                 Add your first account
-              </button>
+              </motion.button>
             </PermissionGate>
-          </div>
+          </motion.div>
         ) : (
-          <div className="space-y-3">
-            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-900/40">
+          <motion.div
+            className="space-y-4"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <div className="flex flex-col gap-3 rounded-xl border border-slate-300/50 bg-gradient-to-r from-slate-50 to-blue-50/30 p-4 sm:flex-row sm:items-center sm:justify-between shadow-sm dark:border-slate-700/50 dark:from-slate-800/50 dark:to-slate-700/30">
               <div className="relative w-full sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
@@ -808,30 +898,51 @@ export default function EmailAccountsView() {
               </div>
             </div>
 
-            <div className="overflow-x-auto overflow-y-visible rounded-xl border border-slate-100 dark:border-slate-800">
+            <div className="overflow-x-auto overflow-y-visible rounded-xl border border-slate-300/60 dark:border-slate-700/60 shadow-md dark:shadow-xl">
               <div className="min-w-[940px]">
-                <div className="grid grid-cols-[minmax(240px,1.6fr)_140px_140px_130px_80px] border-b border-slate-100 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/70 dark:text-slate-400">
+                <div className="grid grid-cols-[minmax(240px,1.6fr)_140px_140px_130px_80px] border-b border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:from-slate-800 dark:to-slate-700/80 dark:text-slate-300">
                   <div>Email</div>
                   <div>Emails sent</div>
                   <div>Warmup emails</div>
                   <div>Campaigns</div>
                   <div className="text-right">Actions</div>
                 </div>
-                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                <div className="divide-y divide-slate-200 dark:divide-slate-700/50">
                   {filteredAccounts.map((account) => {
                     const names = campaignNamesByAccountId.get(account.account_id) || [];
                     const warmupOn = Boolean(account.warmup_settings?.is_warmup_active);
                     const leadSentToday = Number(account.lead_sent_count_today ?? 0);
                     const warmupSentToday = Number(account.warmup_sent_count_today ?? 0);
                     return (
-                      <div key={account.account_id} className="grid grid-cols-[minmax(240px,1.6fr)_140px_140px_130px_80px] items-center px-4 py-4">
+                      <motion.div
+                        key={account.account_id}
+                        className="group grid grid-cols-[minmax(240px,1.6fr)_140px_140px_130px_80px] items-center px-4 py-4 transition-colors hover:bg-blue-50/40 dark:hover:bg-slate-800/40"
+                        whileHover={{ scale: 1.001 }}
+                        transition={{ duration: 0.2 }}
+                      >
                         <div className="min-w-0">
                           <div className="truncate font-semibold text-slate-900 dark:text-slate-100">{account.email}</div>
                           <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                            <span>{account.provider_type}</span>
+                            <span className="font-medium">{account.provider_type}</span>
                             {(() => {
                               const meta = STATUS_META[account.status] || STATUS_META.active;
-                              return <span className={["inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.classes].join(" ")}>{meta.label}</span>;
+                              const isPulse = account.status === "active";
+                              return (
+                                <motion.span
+                                  className={["inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold shadow-sm", meta.classes].join(" ")}
+                                  animate={isPulse ? { scale: [1, 1.05, 1] } : {}}
+                                  transition={isPulse ? { duration: 2, repeat: Infinity, ease: "easeInOut" } : {}}
+                                >
+                                  {isPulse && (
+                                    <motion.div
+                                      className={`h-1.5 w-1.5 rounded-full ${meta.colorBg}`}
+                                      animate={{ opacity: [0.6, 1, 0.6] }}
+                                      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                                    />
+                                  )}
+                                  {meta.label}
+                                </motion.span>
+                              );
                             })()}
                           </div>
                         </div>
@@ -919,7 +1030,7 @@ export default function EmailAccountsView() {
                             </div>
                           </PermissionGate>
                         </div>
-                      </div>
+                      </motion.div>
                     );
                   })}
                 </div>
@@ -930,7 +1041,7 @@ export default function EmailAccountsView() {
                 No accounts match your search/filter.
               </div>
             ) : null}
-          </div>
+          </motion.div>
         )}
       </SectionCard>
 
@@ -938,32 +1049,36 @@ export default function EmailAccountsView() {
       <div
         className={[
           "fixed inset-0 z-[80] transition-opacity duration-300",
-          showForm ? "pointer-events-auto bg-slate-950/25 backdrop-blur-[1px]" : "pointer-events-none bg-transparent",
+          showForm ? "pointer-events-auto bg-slate-950/25 backdrop-blur-sm" : "pointer-events-none bg-transparent",
         ].join(" ")}
         onClick={closeFormDrawer}
         aria-hidden={!showForm}
       >
-        <aside
-          className={[
-            "absolute right-0 top-0 h-screen w-full max-w-2xl overflow-hidden rounded-l-2xl border-l border-slate-200/80 bg-white shadow-2xl transition-transform duration-300 ease-out dark:border-slate-800 dark:bg-slate-900",
-            showForm ? "translate-x-0" : "translate-x-full",
-          ].join(" ")}
-          onClick={(event) => event.stopPropagation()}
-          role="dialog"
-          aria-modal="true"
-          aria-label={formMode === "edit" ? "Edit email account" : "Add email account"}
-        >
+        <AnimatePresence mode="wait">
+          {showForm && (
+            <motion.aside
+              key="email-account-drawer"
+              className="fixed right-0 top-0 h-screen w-full max-w-2xl overflow-hidden rounded-l-2xl border-l border-slate-200/80 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900 z-[85]"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={formMode === "edit" ? "Edit email account" : "Add email account"}
+            >
           <div className="flex h-full flex-col">
-            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+            <div className="pointer-events-auto flex items-start justify-between gap-3 border-b border-slate-200/60 px-5 py-4 dark:border-slate-700/60">
               <div className="flex min-w-0 gap-3">
                 <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   <Gauge className="h-4 w-4" />
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+                  <h2 className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-50">
                     {formMode === "edit" ? "Edit email account" : "Add email account"}
                   </h2>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                     Fill each block in order. Credentials are stored for sending and reply detection only.
                   </p>
                 </div>
@@ -971,7 +1086,7 @@ export default function EmailAccountsView() {
               <button
                 type="button"
                 onClick={closeFormDrawer}
-                className="shrink-0 text-sm font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                className="relative z-50 shrink-0 text-sm font-medium text-slate-400 transition-colors hover:text-rose-500 dark:text-slate-500 dark:hover:text-rose-400"
               >
                 Close
               </button>
@@ -988,7 +1103,9 @@ export default function EmailAccountsView() {
               />
             </div>
           </div>
-        </aside>
+        </motion.aside>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Delete confirmation modal */}
@@ -1097,6 +1214,7 @@ export default function EmailAccountsView() {
           </div>
         </aside>
       </div>
+      </motion.div>
     </div>
   );
 }
