@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { motion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
@@ -59,22 +60,22 @@ export default function Sidebar({ user, onLogout, onSettings }) {
     <aside className="h-screen w-24 shrink-0 border-r border-slate-200 bg-white transition-colors duration-300 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex h-full flex-col px-4 py-6">
         <div className="flex justify-center pb-8">
-          <Link
-            href="/"
-            aria-label="Home"
-            className="group relative flex items-center justify-center rounded-xl p-1.5 transition-all duration-200 hover:scale-105 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
-            <Image
-              src="/icon.png"
-              alt="Campaign Pulse"
-              width={50}
-              height={50}
-              priority
-              className="h-11 w-11 rounded-lg object-contain transition-transform duration-300 group-hover:rotate-3"
-            />
-            <span className="pointer-events-none absolute left-14 top-1/2 -translate-y-1/2 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-sm transition-all duration-200 group-hover:translate-x-1 group-hover:opacity-100 dark:bg-slate-700">
-              Campaign Pulse
-            </span>
+          <Link href="/" aria-label="Go to Home" title="Home" className="cursor-pointer">
+            <motion.div
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ type: "spring", stiffness: 400, damping: 20 }}
+              className="flex h-11 w-11 items-center justify-center rounded-xl"
+            >
+              <Image
+                src="/icon.png"
+                alt="CampaignPulse"
+                width={50}
+                height={50}
+                priority
+                className="h-11 w-11 rounded-lg object-contain"
+              />
+            </motion.div>
           </Link>
         </div>
 

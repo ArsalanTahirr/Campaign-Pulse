@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Plus, Search } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Space_Grotesk } from "next/font/google";
 import { usePathname, useRouter } from "next/navigation";
 import Sidebar from "@/components/dashboard/Sidebar";
@@ -33,6 +34,16 @@ export default function DashboardShell({ children }) {
   const [hasPendingWelcomeToast, setHasPendingWelcomeToast] = useState(false);
   const [fallbackWelcomeName, setFallbackWelcomeName] = useState("");
   const orgMenuRef = useRef(null);
+  const closeTimeoutRef = useRef(null);
+
+  function handleOrgMenuEnter() {
+    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    setIsOrgMenuOpen(true);
+  }
+
+  function handleOrgMenuLeave() {
+    closeTimeoutRef.current = setTimeout(() => setIsOrgMenuOpen(false), 300);
+  }
 
   useEffect(() => {
     function handleOutsideClick(event) {
@@ -190,114 +201,118 @@ export default function DashboardShell({ children }) {
       <Sidebar user={currentUser} onLogout={handleLogout} onSettings={handleSettings} />
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden transition-colors duration-300">
         <header className="sticky top-0 z-50 flex h-20 items-center justify-between border-b border-slate-200 bg-white/95 px-6 backdrop-blur transition-colors duration-300 sm:px-8 dark:border-slate-800 dark:bg-slate-900/95">
-          <h1
-            className={[
-              spaceGrotesk.className,
-              "text-xl font-semibold tracking-tight text-slate-800 transition-all duration-300 sm:text-2xl dark:text-slate-100",
-              activeTitle === "Email Accounts"
-                ? "cursor-default bg-gradient-to-r from-sky-600 via-blue-600 to-cyan-500 bg-[length:200%_100%] bg-clip-text text-transparent"
-                : "",
-            ].join(" ")}
-          >
+          <h1 className={[spaceGrotesk.className, "cursor-default bg-gradient-to-r from-sky-600 via-blue-600 to-cyan-500 bg-clip-text text-xl font-semibold tracking-tight text-transparent sm:text-2xl"].join(" ")}>
             {activeTitle}
           </h1>
           <div
             className="relative"
             ref={orgMenuRef}
-            onMouseEnter={() => setIsOrgMenuOpen(true)}
-            onMouseLeave={() => setIsOrgMenuOpen(false)}
+            onMouseEnter={handleOrgMenuEnter}
+            onMouseLeave={handleOrgMenuLeave}
           >
             <button
               type="button"
               onFocus={() => setIsOrgMenuOpen(true)}
-              className="inline-flex min-w-[220px] items-center justify-between rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-base font-medium text-slate-600 shadow-sm transition-all duration-300 hover:border-blue-300 hover:shadow dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+              className="inline-flex min-w-[220px] items-center justify-between rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2.5 text-base font-medium text-white shadow-lg shadow-indigo-500/25 transition-all duration-300 hover:from-indigo-500 hover:to-blue-500 hover:shadow-indigo-500/40"
             >
               <span className="max-w-[160px] truncate">{workspace?.name || "Select Workspace"}</span>
               <ChevronDown
                 className={[
-                  "h-5 w-5 text-slate-500 transition-transform duration-200 dark:text-slate-400",
+                  "h-5 w-5 text-white/80 transition-transform duration-200",
                   isOrgMenuOpen ? "rotate-180" : "",
                 ].join(" ")}
               />
             </button>
 
-            {isOrgMenuOpen ? (
-              <div className="absolute right-0 top-14 z-20 w-[320px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
-                <div className="relative border-b border-slate-200 bg-slate-50/40 dark:border-slate-700 dark:bg-slate-800/60">
-                  <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={orgSearch}
-                    onChange={(event) => setOrgSearch(event.target.value)}
-                    placeholder="Search"
-                    className="h-12 w-full pl-12 pr-4 text-sm text-slate-700 outline-none placeholder:text-xs placeholder:text-slate-400 dark:bg-transparent dark:text-slate-200"
-                  />
-                </div>
+            {/* Invisible bridge: fills the gap between button and menu so cursor never leaves */}
+            <div className="absolute right-0 top-full h-4 w-full" />
 
-                {filteredWorkspaces.map((ws) => (
-                  <button
-                    key={ws.workspace_id}
-                    type="button"
-                    onClick={() => {
-                      switchWorkspace(ws);
-                      setIsOrgMenuOpen(false);
-                    }}
-                    className={[
-                      "group flex h-16 w-full items-center px-7 text-base font-medium transition-all duration-200",
-                      workspace?.workspace_id === ws.workspace_id
-                        ? "bg-blue-400 text-white hover:bg-blue-500"
-                        : "text-slate-900 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800",
-                    ].join(" ")}
-                  >
-                    <span className="truncate transition-transform duration-200 group-hover:translate-x-0.5">
-                      {ws.name}
-                    </span>
-                  </button>
-                ))}
-
-                <div className="h-3 border-y border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800" />
-
-                {isCreatingWorkspace ? (
-                  <form
-                    onSubmit={handleCreateWorkspace}
-                    className="flex items-center gap-2 px-4 py-3"
-                  >
+            <AnimatePresence>
+              {isOrgMenuOpen && (
+                <motion.div
+                  key="org-menu"
+                  initial={{ opacity: 0, scale: 0.96, y: -6 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96, y: -6 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className="pointer-events-auto absolute right-0 top-[calc(100%+12px)] z-50 w-[320px] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900"
+                >
+                  <div className="relative border-b border-slate-200 bg-slate-50/40 dark:border-slate-700 dark:bg-slate-800/60">
+                    <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                     <input
-                      autoFocus
                       type="text"
-                      value={newWorkspaceName}
-                      onChange={(e) => setNewWorkspaceName(e.target.value)}
-                      placeholder="Workspace name…"
-                      className="h-9 flex-1 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 outline-none focus:border-blue-300"
+                      value={orgSearch}
+                      onChange={(event) => setOrgSearch(event.target.value)}
+                      placeholder="Search"
+                      className="h-12 w-full pl-12 pr-4 text-sm text-slate-700 outline-none placeholder:text-xs placeholder:text-slate-400 dark:bg-transparent dark:text-slate-200"
                     />
+                  </div>
+
+                  {filteredWorkspaces.map((ws) => (
                     <button
-                      type="submit"
-                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+                      key={ws.workspace_id}
+                      type="button"
+                      onClick={() => {
+                        switchWorkspace(ws);
+                        setIsOrgMenuOpen(false);
+                      }}
+                      className={[
+                        "group flex h-16 w-full items-center px-7 text-base font-medium transition-all duration-200",
+                        workspace?.workspace_id === ws.workspace_id
+                          ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                          : "text-slate-900 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800",
+                      ].join(" ")}
                     >
-                      Create
+                      <span className="truncate transition-transform duration-200 group-hover:translate-x-0.5">
+                        {ws.name}
+                      </span>
                     </button>
+                  ))}
+
+                  <div className="h-3 border-y border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800" />
+
+                  {isCreatingWorkspace ? (
+                    <form
+                      onSubmit={handleCreateWorkspace}
+                      className="flex items-center gap-2 px-4 py-3"
+                    >
+                      <input
+                        autoFocus
+                        type="text"
+                        value={newWorkspaceName}
+                        onChange={(e) => setNewWorkspaceName(e.target.value)}
+                        placeholder="Workspace name…"
+                        className="h-9 flex-1 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 outline-none focus:border-indigo-300"
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                      >
+                        Create
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsCreatingWorkspace(false)}
+                        className="rounded-lg px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                      >
+                        Cancel
+                      </button>
+                    </form>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => setIsCreatingWorkspace(false)}
-                      className="rounded-lg px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                      onClick={() => setIsCreatingWorkspace(true)}
+                      className="group flex h-16 w-full items-center gap-2.5 px-7 text-base font-medium text-slate-900 transition-all duration-200 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
                     >
-                      Cancel
+                      <Plus className="h-5 w-5 text-indigo-600 transition-transform duration-200 group-hover:scale-110" />
+                      <span className="transition-transform duration-200 group-hover:translate-x-0.5">
+                        Create Workspace
+                      </span>
                     </button>
-                  </form>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsCreatingWorkspace(true)}
-                    className="group flex h-16 w-full items-center gap-2.5 px-7 text-base font-medium text-slate-900 transition-all duration-200 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
-                  >
-                    <Plus className="h-5 w-5 text-blue-600 transition-transform duration-200 group-hover:scale-110" />
-                    <span className="transition-transform duration-200 group-hover:translate-x-0.5">
-                      Create Workspace
-                    </span>
-                  </button>
-                )}
-              </div>
-            ) : null}
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden transition-colors duration-300">{children}</div>
