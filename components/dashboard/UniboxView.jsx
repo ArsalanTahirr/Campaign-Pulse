@@ -595,7 +595,7 @@ export default function UniboxView() {
   const searchRef = useRef(null);
 
   // Filter state
-  const [activeSelection, setActiveSelection] = useState({ type: "pipeline", id: "lead" });
+  const [activeSelection, setActiveSelection] = useState({ type: "more", id: "inbox" });
   const [isStatusOpen, setIsStatusOpen] = useState(true);
   const [isCampaignsOpen, setIsCampaignsOpen] = useState(false);
   const [isInboxesOpen, setIsInboxesOpen] = useState(false);
