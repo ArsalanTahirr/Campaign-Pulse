@@ -65,7 +65,7 @@ function FloatingInput({ id, label, type = "text", value, onChange, autoComplete
     : "text-slate-500 peer-focus:text-brand-600";
 
   return (
-    <div className="relative pb-5">
+    <div className="relative pb-3.5">
       <div className={`relative ${className} ${showError ? "animate-shake" : ""}`}>
         <input
           id={id}
@@ -94,7 +94,7 @@ function FloatingInput({ id, label, type = "text", value, onChange, autoComplete
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.18 }}
-            className="absolute bottom-0 left-0 text-xs text-red-600"
+            className="mt-1 text-xs text-red-600"
           >
             {error}
           </motion.p>
@@ -196,10 +196,14 @@ export default function SignupPage() {
     const trimmedEmail = formData.email.trim();
 
     if (step === 1) {
-      if (!trimmedFirstName || trimmedFirstName.length < 2) {
+      if (!trimmedFirstName) {
+        nextErrors.firstName = "First name is required.";
+      } else if (trimmedFirstName.length < 2) {
         nextErrors.firstName = "First name must be at least 2 characters.";
       }
-      if (!trimmedLastName || trimmedLastName.length < 2) {
+      if (!trimmedLastName) {
+        nextErrors.lastName = "Last name is required.";
+      } else if (trimmedLastName.length < 2) {
         nextErrors.lastName = "Last name must be at least 2 characters.";
       }
       setTouched((prev) => ({ ...prev, firstName: true, lastName: true }));
@@ -247,12 +251,18 @@ export default function SignupPage() {
     const value = formData[field] || "";
 
     if (field === "firstName") {
-      if (!value.trim() || value.trim().length < 2) {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        nextErrors.firstName = "First name is required.";
+      } else if (trimmed.length < 2) {
         nextErrors.firstName = "First name must be at least 2 characters.";
       } else delete nextErrors.firstName;
     }
     if (field === "lastName") {
-      if (!value.trim() || value.trim().length < 2) {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        nextErrors.lastName = "Last name is required.";
+      } else if (trimmed.length < 2) {
         nextErrors.lastName = "Last name must be at least 2 characters.";
       } else delete nextErrors.lastName;
     }
