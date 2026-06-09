@@ -110,13 +110,13 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Next.js Frontend (:3000)                    │
-│  Landing · Auth · Dashboard (Campaigns · Unibox · Analytics)   │
+│  Landing · Auth · Dashboard (Campaigns · Unibox · Analytics)    │
 └──────────────────────────┬──────────────────────────────────────┘
                            │ HTTP + session cookies
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    FastAPI Backend (:8000)                      │
-│  /auth  /workspaces  /campaigns  /unibox  /analytics  /track   │
+│  /auth  /workspaces  /campaigns  /unibox  /analytics  /track    │
 └──────────┬──────────────────────────────┬───────────────────────┘
            │                              │
            ▼                              ▼
